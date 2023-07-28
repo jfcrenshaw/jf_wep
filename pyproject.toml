@@ -1,0 +1,43 @@
+[project]
+name = "jf_wep"
+version = "0.0.1"
+authors = [
+  { name="John Franklin Crenshaw", email="jfcrenshaw@gmail.com" },
+]
+description = "My wavefront estimator."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "galsim",
+]
+
+[project.optional-dependencies]
+dev = [
+    "matplotlib",
+    "jupyterlab",
+    "black",
+    "flake8",
+    "mypy",
+    "pytest",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/jfcrenshaw/jf_wep"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length=79
+
+[tool.isort]
+profile = "black"

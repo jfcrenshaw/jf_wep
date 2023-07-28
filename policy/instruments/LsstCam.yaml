@@ -1,0 +1,9 @@
+# LSST Telescope Parameters
+# lsst.obs.lsst.LsstCam
+
+name: LsstCam
+diameter: 8.36 # aperture diameter in meters
+obscuration: 0.61 # fractional obscuration
+focalLength: 10.312 # effective focal length in meters
+defocalOffset: 1.5e-3 # defocal offset in meters
+pixelSize: 10.0e-6 # pixel size in meters

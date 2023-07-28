@@ -1,0 +1,9 @@
+# LATISS Telescope Parameters
+# lsst.obs.lsst.Latiss
+
+name: AuxTel
+diameter: 1.2 # aperture diameter in meters
+obscuration: 0.3525 # fractional obscuration
+focalLength: 21.6 # effective focal length in meters
+defocalOffset: 32.8e-3 # defocal offset in meters
+pixelSize: 10.0e-6 # pixel size in meters

@@ -1,0 +1,10 @@
+# Default parameters for WfEstimator
+# see the docstring for definitions of parameters
+
+algo: tie
+algo_params: null
+camType: LsstCam
+instParams: null
+jmax: 22
+units: nm
+shapeMode: strict

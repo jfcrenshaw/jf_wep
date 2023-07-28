@@ -1,0 +1,4 @@
+# Default parameters for ZernikeObject
+instConfig: policy/instruments/LsstCam.yaml
+jmax: 22
+nPixels: 125
