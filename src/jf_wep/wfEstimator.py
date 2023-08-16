@@ -11,10 +11,9 @@ import numpy as np
 
 from jf_wep.donutImage import DonutImage
 from jf_wep.instrument import Instrument
-from jf_wep.utils import mergeParams, loadConfig
+from jf_wep.utils import loadConfig, mergeParams
 from jf_wep.wfAlgorithms.tie import TIEAlgorithm
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
-from jf_wep.zernikeObject import ZernikeObject
 
 
 class WfEstimator:
@@ -34,20 +33,10 @@ class WfEstimator:
     algoConfig : Path or str or dict or WfAlgorithm, optional
         Algorithm configuration. If a Path or string, it is assumed this
         points to a config file, which is used to configure the algorithm.
-        If a dictionary, it is assumed to hold keywords for configuration.
-        If a WfAlgorithm object, that object is just used.
-        If None, the algorithm defaults are used.
-        Note that setting camType, instParams, or jmax will cause
-        WfEstimator to overwrite the algorithm's Instrument and
-        ZernikeObject configurations that were read from here.
-    instConfig : Path or str or dict or Instrument, optional
-        Instrument configuration. If a Path or string, it is assumed this
-        points to a config file, which is used to configure the Instrument.
-        If a dictionary, it is assumed to hold keywords for configuration.
-        If an Instrument object, that object is just used.
-    jmax : int, optional
-        The wavefront estimators return Zernike coefficients from Noll
-        index 4 up to jmax, inclusive. Must be an integer >= 4.
+        If the path begins with "policy/", then it is assumed the path is
+        relative to the policy directory. If a dictionary, it is assumed 
+        to hold keywords for configuration. If a WfAlgorithm object, that 
+        object is just used. If None, the algorithm defaults are used.
     units : str, optional
         Units in which the wavefront is returned. Options are "nm", "um",
         or "arcsecs".
@@ -69,8 +58,6 @@ class WfEstimator:
         configFile: Union[Path, str, None] = "policy/wfEstimator.yaml",
         algo: Optional[str] = None,
         algoConfig: Union[Path, str, dict, WfAlgorithm, None] = None,
-        instConfig: Union[Path, str, dict, Instrument, None] = None,
-        jmax: Optional[int] = None,
         units: Optional[str] = None,
         shapeMode: Optional[str] = None,
     ) -> None:
@@ -78,8 +65,6 @@ class WfEstimator:
             configFile=configFile,
             algo=algo,
             algoConfig=algoConfig,
-            instConfig=instConfig,
-            jmax=jmax,
             units=units,
             shapeMode=shapeMode,
         )
@@ -126,29 +111,6 @@ class WfEstimator:
         if algoConfig is not None:
             self._algo = loadConfig(algoConfig, self.algo)
 
-        # Set the Instrument
-        instConfig = params["instConfig"]
-        if instConfig is not None:
-            self._instrument = loadConfig(instConfig, Instrument)
-
-        # Create the ZernikeObject
-        jmax = params["jmax"]
-        if jmax is not None:
-            self._zernikeObject = ZernikeObject(
-                jmax=jmax,
-                instConfig=self.instrument,
-            )
-        # If we updated the instrument, we also must update the ZernikeObject
-        elif instConfig is not None:
-            self._zernikeObject = ZernikeObject(
-                jmax=self.jmax,
-                instConfig=self.instrument,
-            )
-
-        # Propagate changes to Instrument and jmax to the algorithm
-        if instConfig is not None or jmax is not None:
-            self.algo.config(instConfig=self.instrument, jmax=jmax)
-
         # Set the units
         units = params["units"]
         if units is not None:
@@ -171,24 +133,6 @@ class WfEstimator:
                     f"Please choose one of {str(allowed_shapeModes)[1:-1]}."
                 )
             self._shapeMode = shapeMode
-
-    @property
-    def instrument(self) -> Instrument:
-        """Return the Instrument."""
-        return self._instrument
-
-    @property
-    def zernikeObject(self) -> ZernikeObject:
-        """Return the ZernikeObject."""
-        return self._zernikeObject
-
-    @property
-    def jmax(self) -> int:
-        """Return the maximum Zernike Noll index to be estimated.
-
-        For details about this parameter, see the class docstring.
-        """
-        return self.zernikeObject.jmax
 
     @property
     def algo(self) -> WfAlgorithm:
@@ -259,6 +203,6 @@ class WfEstimator:
         if self.units in ["um", "arcsecs"]:
             zk = 1e-3 * zk
         if self.units == "arcsecs":
-            zk = self.zernikeObject.convertZernikesToPsfWidth(zk)
+            raise NotImplementedError
 
         return zk

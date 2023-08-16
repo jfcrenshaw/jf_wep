@@ -1,140 +1,15 @@
 """Define the classes associated with the TIE solver."""
 import warnings
 from pathlib import Path
-from typing import Optional, Union, Iterable
+from typing import Iterable, Optional, Union
 
 import numpy as np
 
 from jf_wep.donutImage import DonutImage
 from jf_wep.instrument import Instrument
-from jf_wep.utils import DefocalType, mergeParams, loadConfig
+from jf_wep.utils import DefocalType, ImageMapper, loadConfig, mergeParams
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
 from jf_wep.zernikeObject import ZernikeObject
-
-
-class TIECompensator:
-    """Class that compensates images for the TIE using the given wavefront.
-
-    Parameters
-    ----------
-        opticalModel : str, optional
-            The optical model used for image compensation. If "paraxial", the
-            original algorithm from Rodier & Rodier (1993) is used, which is
-            suitable for images near the optical axis on telescope with large
-            focal ratios. If "onAxis", the modification for small focal ratios
-            (i.e. fast optics) introduced by Xin (2015) is used. If "offAxis",
-            an empirical compensation polynomial is used. This is suitable for
-            fast, far from the optical axis.
-            (the default is "paraxial")
-    """
-
-    def __init__(self, opticalModel: str = "paraxial") -> None:
-        # Set the optical model
-        allowed_opticalModels = ["paraxial", "onAxis", "offAxis"]
-        if opticalModel not in allowed_opticalModels:
-            raise ValueError(
-                f"optical model '{opticalModel}' not supported. "
-                f"Please choose one of {str(allowed_opticalModels)[1:-1]}."
-            )
-        self._opticalModel = opticalModel
-
-    @property
-    def opticalModel(self) -> Union[str, None]:
-        """Return the name of the optical model.
-
-        For details about this parameter, see the docstring
-        for the self.config() method.
-        """
-        return self._opticalModel
-
-    def _paraxial_compensation(
-        self,
-        image: DonutImage,
-        zk: np.ndarray,
-    ) -> np.ndarray:
-        """Compensate the image using the paraxial model.
-
-        Parameters
-        ----------
-        image : DonutImage
-            The image to compensate.
-        zk : np.ndarray
-            The wavefront Zernike coefficients (in nm) to use for
-            image compensation.
-
-        Returns
-        -------
-        np.ndarray
-            The compensated image array
-        """
-        raise NotImplementedError
-
-    def _onAxis_compensation(
-        self,
-        image: DonutImage,
-        zk: np.ndarray,
-    ) -> np.ndarray:
-        """Compensate the image using the onAxis model.
-
-        Parameters
-        ----------
-        image : DonutImage
-            The image to compensate.
-        zk : np.ndarray
-            The wavefront Zernike coefficients (in nm) to use for
-            image compensation.
-
-        Returns
-        -------
-        np.ndarray
-            The compensated image array
-        """
-        raise NotImplementedError
-
-    def _offAxis_compensation(
-        self,
-        image: DonutImage,
-        zk: np.ndarray,
-    ) -> np.ndarray:
-        """Compensate the image using the offAxis model.
-
-        Parameters
-        ----------
-        image : DonutImage
-            The image to compensate.
-        zk : np.ndarray
-            The wavefront Zernike coefficients (in nm) to use for
-            image compensation.
-
-        Returns
-        -------
-        np.ndarray
-            The compensated image array
-        """
-        raise NotImplementedError
-
-    def compensate(self, image: DonutImage, zk: np.ndarray) -> np.ndarray:
-        """Compensate the image using the provided wavefront.
-
-        Parameters
-        ----------
-        image : DonutImage
-            The image to compensate.
-        zk : np.ndarray
-            The wavefront Zernike coefficients (in nm) to use for
-            image compensation.
-
-        Returns
-        -------
-        np.ndarray
-            The compensated image array
-        """
-        if self.opticalModel == "paraxial":
-            return self._paraxial_compensation(image, zk)
-        elif self.opticalModel == "onAxis":
-            return self._onAxis_compensation(image, zk)
-        else:
-            return self._offAxis_compensation(image, zk)
 
 
 class TIEAlgorithm(WfAlgorithm):
@@ -142,7 +17,7 @@ class TIEAlgorithm(WfAlgorithm):
 
     Parameters
     ----------
-    configFile : str, optional
+    configFile : Path or str, optional
         Path to file specifying values for the other parameters. If the
         path starts with "policy/", it will look in the policy directory.
         Any explicitly passed parameters override values found in this file
@@ -257,15 +132,8 @@ class TIEAlgorithm(WfAlgorithm):
             self._solver = solver
 
         # Create the compensator
-        opticalModel = params["opticalModel"]
-        if opticalModel is not None:
-            allowed_opticalModels = ["paraxial", "onAxis", "offAxis"]
-            if opticalModel not in allowed_opticalModels:
-                raise ValueError(
-                    f"Optical model '{opticalModel}' not supported. "
-                    f"Please choose one of {str(allowed_opticalModels)[1:-1]}."
-                )
-            self._compensator = TIECompensator(opticalModel=opticalModel)
+        # Allow ImageMapper to handle parameter validation
+        warnings.warn("ImageMapper not configured!")
 
         # Set maxIter
         maxIter = params["maxIter"]
@@ -322,11 +190,6 @@ class TIEAlgorithm(WfAlgorithm):
         For details about this parameter, see the class docstring.
         """
         return self._solver
-
-    @property
-    def compensator(self) -> TIECompensator:
-        """Return the TIECompensator."""
-        return self._compensator
 
     @property
     def opticalModel(self) -> Union[str, None]:
@@ -437,8 +300,8 @@ class TIEAlgorithm(WfAlgorithm):
             zkComp[(jmaxComp - 3) :] = 0
 
             # Compensate images using the Zernikes
-            intraComp = self.compensator.compensate(intra, zkComp)
-            extraComp = self.compensator.compensate(extra, zkComp)
+            intraPupil = self.imageMapper.imageToPupil(intra.image, intra.defocalType, zkComp)
+            extraPupil = self.imageMapper.imageToPupil(extra.image, extra.defocalType, zkComp)
 
             warnings.warn("\nNEED TO CHECK FOR CAUSTICS.\n")
             warnings.warn("\nNOT CURRENTLY APPLYING PUPIL MASK.\n")

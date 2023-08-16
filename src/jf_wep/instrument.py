@@ -212,6 +212,6 @@ class Instrument:
         grid /= self.donutRadius
 
         # Create u and v grids
-        vGrid, uGrid = np.meshgrid(grid, grid)
+        uGrid, vGrid = np.meshgrid(grid, grid)
 
         return uGrid, vGrid

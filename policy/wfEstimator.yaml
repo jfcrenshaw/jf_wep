@@ -3,8 +3,7 @@
 
 algo: tie
 algo_params: null
-camType: LsstCam
-instParams: null
+instParams: policy/instruments/LsstCam.yaml
 jmax: 22
 units: nm
 shapeMode: strict
