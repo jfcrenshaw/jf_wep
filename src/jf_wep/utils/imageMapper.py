@@ -271,8 +271,6 @@ class ImageMapper:
             + (defocalSign * B) * (Cuu + Cvv)
             + (defocalSign * B) ** 2 * (Cuu * Cvv - Cuv * Cvu)
         )
-        # Set dummy jacobian to create gradient across donut
-        detJac = 1 + uPupil / 4
 
         return uPupil, vPupil, uImage, vImage, detJac
 
