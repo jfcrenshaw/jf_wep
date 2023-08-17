@@ -8,8 +8,11 @@ from typing import Optional, Tuple, Union
 import numpy as np
 from scipy.interpolate import griddata, interpn
 
+from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils import DefocalType, loadConfig, mergeParams, zernikeGradEval
+from jf_wep.utils.enums import DefocalType
+from jf_wep.utils.paramReaders import loadConfig, mergeParams
+from jf_wep.utils.zernikes import zernikeGradEval
 
 
 class ImageMapper:
@@ -97,7 +100,9 @@ class ImageMapper:
         """
         return self._instrument
 
-    def _addIntrinsicZernikes(self, zkCoeff: np.ndarray) -> np.ndarray:
+    def _addIntrinsicZernikes(
+        self, fieldAngle: np.ndarray, zkCoeff: np.ndarray
+    ) -> np.ndarray:
         """Add the intrinsic Zernikes to the input Zernikes coefficients.
 
         Note that the intrinsic Zernikes are just the OPD from the reference
@@ -106,7 +111,9 @@ class ImageMapper:
 
         Parameters
         ----------
-        zkCoeff: np.ndarray
+        fieldAngle : np.ndarray
+            The x- and y- field angle of the source to be mapped, in degrees.
+        zkCoeff : np.ndarray
             The input Zernike coefficients, in meters
 
         Returns
@@ -134,8 +141,7 @@ class ImageMapper:
         zkIntrinsic = (
             batoid.zernikeTA(
                 telescope,
-                0,
-                0,
+                *np.deg2rad(fieldAngle),
                 bandpass.effective_wavelength * 1e-9,
                 jmax=28,
                 eps=telescope.pupilObscuration,
@@ -157,19 +163,16 @@ class ImageMapper:
 
     def _constructMap(
         self,
-        nPixels: int,
-        defocalType: DefocalType,
+        donutStamp: DonutStamp,
         zkCoeff: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Construct the mapping between the image and pupil planes.
 
         Parameters
         ----------
-        nPixels : int
-            The number of pixels on a side for the pixelization of the pupil.
-        defocalType : DefocalType
-            A DefocalType enum that specifies whether the image plane is the
-            intrafocal or extrafocal image plane.
+        donutStamp : DonutStamp
+            A stamp object containing the array to be mapped between the
+            pupil and the image plane, plus the required metadata.
         zkCoeff : np.ndarray
             The wavefront at the pupil, represented as Zernike coefficients
             in meters for Noll indices >= 4.
@@ -188,7 +191,7 @@ class ImageMapper:
             The determinant of the Jacobian of the mapping
         """
         # Add the intrinsic Zernikes to the input zernikes
-        zkMap = self._addIntrinsicZernikes(zkCoeff)
+        zkMap = self._addIntrinsicZernikes(donutStamp.fieldAngle, zkCoeff)
 
         # Get instrument geometry info
         f = self.instrument.focalLength
@@ -199,9 +202,10 @@ class ImageMapper:
         # Determine defocal sign from the image plane at z = f +/- l
         # I.e., the extrafocal image at z = f + l is associated with +1,
         # and the intrafocal image at z = f - l is associated with -1.
-        defocalSign = +1 if defocalType == DefocalType.Extra else -1
+        defocalSign = +1 if donutStamp.defocalType == DefocalType.Extra else -1
 
         # Get a regular (normalized) grid on the pupil
+        nPixels = donutStamp.image.shape[0]
         uPupil, vPupil = self.instrument.createPupilGrid(nPixels)
 
         # Calculate all 1st- and 2nd-order Zernike derivatives
@@ -248,7 +252,7 @@ class ImageMapper:
         d2Wdvdu = d2Wdudv
 
         # Plus the first order derivatives at the center of the pupil
-        d1WduCenter = zernikeGradEval(
+        d1Wdu0 = zernikeGradEval(
             np.zeros(1),
             np.zeros(1),
             uOrder=1,
@@ -256,7 +260,7 @@ class ImageMapper:
             zkCoeff=zkMap,
             obscuration=obscuration,
         )
-        d1WdvCenter = zernikeGradEval(
+        d1Wdv0 = zernikeGradEval(
             np.zeros(1),
             np.zeros(1),
             uOrder=0,
@@ -279,8 +283,8 @@ class ImageMapper:
 
         # Center the image of the pupil
         centerShiftScale = -f * (f + defocalSign * l) / (l * R**2)
-        uImage -= centerShiftScale * d1WduCenter
-        vImage -= centerShiftScale * d1WdvCenter
+        uImage -= centerShiftScale * d1Wdu0
+        vImage -= centerShiftScale * d1Wdv0
 
         # And the determinant of the Jacobian
         detJac = (
@@ -293,90 +297,118 @@ class ImageMapper:
 
     def pupilToImage(
         self,
-        array: np.ndarray,
-        defocalType: DefocalType,
+        donutStamp: DonutStamp,
         zkCoeff: np.ndarray = np.zeros(1),
-    ) -> np.ndarray:
-        """Map an array from the pupil to the image plane.
+    ) -> DonutStamp:
+        """Map a stamp from the pupil to the image plane.
 
         Parameters
         ----------
-        array : np.ndarray
-            The array to be mapped from the pupil to the image plane.
-        defocalType : DefocalType
-            A DefocalType enum that specifies whether to map to the intrafocal
-            or extrafocal image plane.
+        donutStamp : DonutStamp
+            A stamp object containing the array to be mapped from the pupil
+            to the image plane, plus the required metadata.
         zkCoeff : np.ndarray, optional
             The wavefront at the pupil, represented as Zernike coefficients
-            in nm for Noll indices >= 4. Note this is in addition to the
-            intrinsic wavefront aberration.
+            in meters, for Noll indices >= 4. Note this is in addition to
+            the intrinsic wavefront aberration.
             (the default is zero)
 
         Returns
         -------
-        np.ndarray
-            The array mapped to the image plane.
+        DonutStamp
+            The stamp object mapped to the image plane.
         """
+        # Make a copy of the stamp
+        stamp = donutStamp.copy()
+
         # Construct the map between the pupil and image planes
         uPupil, vPupil, uImage, vImage, detJac = self._constructMap(
-            array.shape[0], defocalType, zkCoeff
+            stamp, zkCoeff,
         )
 
-        # Interpolate the array onto the image plane
+        # Mask the pupil. We do this in two steps so that it plays nicely
+        # with the interpolation scheme below
+
+        # First, we want an inner mask that we will use to set the intensity
+        # inside the obscuration to zero. We will still project these points
+        # onto the image plane, though, so the interpolator knows that the
+        # interior of the obscuration has zero flux
+        rPupil = np.sqrt(uPupil**2 + vPupil**2)
+        innerMask = rPupil > self.instrument.obscuration
+        
+        # Second, we want an outer mask to totally ignore the points outside
+        # a normalized pupil radius of 1. These points are supposed to have
+        # zero flux too, but sometimes get mapped into the same areas as the
+        # points with non-zero flux. The presence of these zero-flux points
+        # in the same region of the pupil plane causes the interpolator to
+        # decrease the flux in these areas, which it should not do
+        outerMask = rPupil < 1
+
+        # Interpolate onto the image plane
         image = griddata(
-            (uImage.ravel(), vImage.ravel()),
-            (array / detJac).ravel(),
+            (uImage[outerMask].ravel(), vImage[outerMask].ravel()),
+            (innerMask * stamp.image / detJac)[outerMask].ravel(),
             (uPupil.ravel(), vPupil.ravel()),
             method="linear",
         ).reshape(uPupil.shape)
 
-        # Replace NaNs with zeros
+        # Set NaNs to zero
         image = np.nan_to_num(image)
 
-        return image
+        # Update the stamp with the new image
+        stamp.config(image=image)
+
+        return stamp
 
     def imageToPupil(
         self,
-        array: np.ndarray,
-        defocalType: DefocalType,
+        donutStamp: DonutStamp,
         zkCoeff: np.ndarray = np.zeros(1),
-    ) -> np.ndarray:
-        """Map an array from the image to the pupil plane.
+    ) -> DonutStamp:
+        """Map a stamp from the image to the pupil plane.
 
         Parameters
         ----------
-        array : np.ndarray
-            The array to be mapped from the image to the pupil plane.
-        defocalType : DefocalType
-            A DefocalType enum that specifies whether to map from the
-            intrafocal or extrafocal image plane.
+        donutStamp : DonutStamp
+            A stamp object containing the array to be mapped from the image
+            to the pupil plane, plus the required metadata.
         zkCoeff : np.ndarray, optional
             The wavefront at the pupil, represented as Zernike coefficients
-            in nm for Noll indices >= 4. Note this is in addition to the
-            intrinsic wavefront aberration.
+            in meters, for Noll indices >= 4. Note this is in addition to
+            the intrinsic wavefront aberration.
             (the default is zero)
 
         Returns
         -------
-        np.ndarray
-            The array mapped to the pupil plane.
+        DonutStamp
+            The stamp object mapped to the image plane.
         """
+        # Make a copy of the stamp
+        stamp = donutStamp.copy()
+
         # Get the map between the pupil and image planes
         uPupil, vPupil, uImage, vImage, detJac = self._constructMap(
-            array.shape[0], defocalType, zkCoeff
+            stamp, zkCoeff
         )
 
         # Interpolate the array onto the pupil plane
         pupil = interpn(
             (vPupil[:, 0], uPupil[0, :]),
-            array,
+            stamp.image,
             (vImage, uImage),
             method="linear",
             bounds_error=False,
         )
         pupil *= detJac
 
-        # Replace NaNs with zeros
+        # Set NaNs to zero
         pupil = np.nan_to_num(pupil)
 
-        return pupil
+        # Mask the pupil
+        mask = self.instrument.createPupilMask(pupil.shape[0])
+        pupil *= mask
+
+        # Update the stamp with the new pupil image
+        stamp.config(image=pupil)
+
+        return stamp

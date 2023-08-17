@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from jf_wep.donutImage import DonutImage
+from jf_wep.donutStamp import DonutImage
 
 
 class TestBadParams:

@@ -1,12 +1,14 @@
 """Class to hold donut images along with metadata."""
-from typing import Union
+from copy import deepcopy
+from typing import Union, Optional
 
 import numpy as np
+from typing_extensions import Self
 
-from jf_wep.utils import DefocalType, FilterLabel
+from jf_wep.utils.enums import DefocalType, FilterLabel
 
 
-class DonutImage:
+class DonutStamp:
     """Class to hold a donut image along with metadata.
 
     Parameters
@@ -28,7 +30,7 @@ class DonutImage:
         Positions of blended donuts relative to location of center donut,
         in pixels. Must be provided in the format [dxList, dyList].
         The lengths of dxList and dyList must be the same.
-        (the default is None)
+        (the default is an empty array, i.e. no blends)
 
     Raises
     ------
@@ -50,47 +52,69 @@ class DonutImage:
         fieldAngle: Union[np.ndarray, tuple, list],
         defocalType: Union[DefocalType, str],
         filterLabel: Union[FilterLabel, str],
+        blendOffsets: Union[np.ndarray, tuple, list] = np.zeros((2, 0)),
+    ) -> None:
+        self.config(
+            image=image,
+            fieldAngle=fieldAngle,
+            defocalType=defocalType,
+            filterLabel=filterLabel,
+            blendOffsets=blendOffsets,
+        )
+
+    def config(
+        self,
+        image: Optional[np.ndarray] = None,
+        fieldAngle: Union[np.ndarray, tuple, list, None] = None,
+        defocalType: Union[DefocalType, str, None] = None,
+        filterLabel: Union[FilterLabel, str, None] = None,
         blendOffsets: Union[np.ndarray, tuple, list, None] = None,
     ) -> None:
+        """Configure the stamp.
+
+        For details on the parameters, see the class docstring.
+        """
         # Set the image
-        if not isinstance(image, np.ndarray):
-            raise TypeError("image must be a numpy array.")
-        if len(image.shape) != 2 or image.shape[0] != image.shape[1]:
-            raise ValueError("The image array must be square.")
-        self._image = image
+        if image is not None:
+            if not isinstance(image, np.ndarray):
+                raise TypeError("image must be a numpy array.")
+            if len(image.shape) != 2 or image.shape[0] != image.shape[1]:
+                raise ValueError("The image array must be square.")
+            self._image = image
 
         # Set the field angle
-        fieldAngle = np.array(fieldAngle, dtype=float).squeeze()
-        if fieldAngle.shape != (2,):
-            raise ValueError("Field angle must have shape (2,).")
-        self._fieldAngle = fieldAngle
+        if fieldAngle is not None:
+            fieldAngle = np.array(fieldAngle, dtype=float).squeeze()
+            if fieldAngle.shape != (2,):
+                raise ValueError("Field angle must have shape (2,).")
+            self._fieldAngle = fieldAngle
 
         # Set the defocal type
-        if isinstance(defocalType, str):
-            self._defocalType = DefocalType(defocalType)
-        elif isinstance(defocalType, DefocalType):
-            self._defocalType = defocalType
-        else:
-            raise TypeError(
-                "defocalType must be a DefocalType Enum, or "
-                "one of the strings 'intra' or 'extra'."
-            )
+        if defocalType is not None:
+            if isinstance(defocalType, str):
+                self._defocalType = DefocalType(defocalType)
+            elif isinstance(defocalType, DefocalType):
+                self._defocalType = defocalType
+            else:
+                raise TypeError(
+                    "defocalType must be a DefocalType Enum, or "
+                    "one of the strings 'intra' or 'extra'."
+                )
 
         # Set the filter label
-        if isinstance(filterLabel, str):
-            self._filterLabel = FilterLabel(filterLabel)
-        elif isinstance(filterLabel, FilterLabel):
-            self._filterLabel = filterLabel
-        else:
-            raise TypeError(
-                "filterLabel must be a FilterLabel Enum, or "
-                "one of the corresponding strings."
-            )
+        if filterLabel is not None:
+            if isinstance(filterLabel, str):
+                self._filterLabel = FilterLabel(filterLabel)
+            elif isinstance(filterLabel, FilterLabel):
+                self._filterLabel = filterLabel
+            else:
+                raise TypeError(
+                    "filterLabel must be a FilterLabel Enum, or "
+                    "one of the corresponding strings."
+                )
 
         # Set the blend offsets
-        if blendOffsets is None:
-            self._blendOffsets = blendOffsets
-        else:
+        if blendOffsets is not None:
             blendOffsets = np.array(blendOffsets, dtype=float)
             if blendOffsets.shape[0] != 2 or len(blendOffsets.shape) != 2:
                 raise ValueError(
@@ -109,7 +133,7 @@ class DonutImage:
 
     @property
     def fieldAngle(self) -> np.ndarray:
-        """Return the field angle of the donut.
+        """Return the field angle of the donut in degrees.
 
         For details about this parameter, see the class docstring.
         """
@@ -138,3 +162,13 @@ class DonutImage:
         For details about this parameter, see the class docstring.
         """
         return self._blendOffsets
+
+    def copy(self) -> Self:
+        """Return a copy of the DonutImage object.
+
+        Returns
+        -------
+        DonutImage
+            A deep copy of self.
+        """
+        return deepcopy(self)

@@ -9,7 +9,7 @@ from typing import Optional, Union
 
 import numpy as np
 
-from jf_wep.donutImage import DonutImage
+from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
 from jf_wep.utils import loadConfig, mergeParams
 from jf_wep.wfAlgorithms.tie import TIEAlgorithm
@@ -160,8 +160,8 @@ class WfEstimator:
 
     def estimateWf(
         self,
-        I1: DonutImage,
-        I2: Union[DonutImage, None] = None,
+        I1: DonutStamp,
+        I2: Union[DonutStamp, None] = None,
     ) -> np.ndarray:
         """Estimate the wavefront for the image or pair of images.
 
@@ -172,10 +172,10 @@ class WfEstimator:
 
         Parameters
         ----------
-        I1 : DonutImage
-            An image object containing an intra- or extra-focal donut image.
-        I2 : DonutImage, optional
-            A second image, on the opposite side of focus from I1.
+        I1 : DonutStamp
+            A stamp object containing an intra- or extra-focal donut image.
+        I2 : DonutStamp, optional
+            A second stamp, on the opposite side of focus from I1.
             (the default is None)
 
         Returns

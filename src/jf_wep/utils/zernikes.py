@@ -64,7 +64,7 @@ def createZernikeGradBasis(
     # Create the normalized pupil grid
     uPupil, vPupil = instrument.createPupilGrid(nPixels)
 
-    # Get the Noll coefficient array for u derivates
+    # Get the Noll coefficient array for the u derivates
     nollCoeffU = galsim.zernike._noll_coef_array_xy_gradx(
         jmax, instrument.obscuration
     )

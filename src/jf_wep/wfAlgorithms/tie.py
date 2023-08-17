@@ -4,17 +4,15 @@ from typing import Iterable, Optional, Union
 
 import numpy as np
 
-from jf_wep.donutImage import DonutImage
+from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils import (
-    DefocalType,
-    ImageMapper,
-    loadConfig,
-    mergeParams,
-    createZernikeBasis,
-    createZernikeGradBasis,
-)
+from jf_wep.utils.enums import DefocalType
+from jf_wep.utils.imageMapper import ImageMapper
+from jf_wep.utils.paramReaders import loadConfig, mergeParams
+from jf_wep.utils.zernikes import createZernikeBasis, createZernikeGradBasis
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
+
+import warnings
 
 
 class TIEAlgorithm(WfAlgorithm):
@@ -56,6 +54,10 @@ class TIEAlgorithm(WfAlgorithm):
         been reached, all Zernike coefficients are used during compensation.
     compGain : float, optional
         The gain used to update the Zernikes for image compensation.
+    saveHistory : bool, optional
+        Whether to save the algorithm history in the self.history attribute.
+        If True, then self.history contains information about the most recent
+        time the algorithm was run.
 
     Raises
     ------
@@ -73,6 +75,7 @@ class TIEAlgorithm(WfAlgorithm):
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
         compGain: Optional[float] = None,
+        saveHistory: Optional[bool] = None,
     ) -> None:
         self.config(
             configFile=configFile,
@@ -83,6 +86,7 @@ class TIEAlgorithm(WfAlgorithm):
             maxIter=maxIter,
             compSequence=compSequence,
             compGain=compGain,
+            saveHistory=saveHistory,
         )
 
     def config(  # type: ignore[override]
@@ -95,6 +99,7 @@ class TIEAlgorithm(WfAlgorithm):
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
         compGain: Optional[float] = None,
+        saveHistory: Optional[bool] = None,
     ) -> None:
         """Configure the TIE solver.
 
@@ -110,6 +115,7 @@ class TIEAlgorithm(WfAlgorithm):
             maxIter=maxIter,
             compSequence=compSequence,
             compGain=compGain,
+            saveHistory=saveHistory,
         )
 
         # Set the instrument
@@ -175,6 +181,17 @@ class TIEAlgorithm(WfAlgorithm):
                 raise ValueError("compGain must be positive.")
             self._compGain = compGain
 
+        # Set whether to save the algorithm history
+        saveHistory = params["saveHistory"]
+        if saveHistory is not None:
+            if not isinstance(saveHistory, bool):
+                raise TypeError("saveHistory must be a bool.")
+            self._saveHistory = saveHistory
+
+            # If we are turning history-saving off, delete any old history
+            # This is to avoid confusion
+            self._history = {}  # type: ignore
+
     @property
     def instrument(self) -> Instrument:
         """Return the instrument object.
@@ -236,6 +253,39 @@ class TIEAlgorithm(WfAlgorithm):
         """
         return self._compGain
 
+    @property
+    def history(self) -> dict:
+        """The algorithm history.
+
+        The history is a dictionary saving the intermediate products from
+        each iteration of the TIE solver. The first iteration is saved as
+        history[0].
+
+        The entry for each iteration is itself a dictionary containing
+        the following keys:
+            - "intraComp" - the compensated intrafocal image
+            - "extraComp" - the compensated extrafocal image
+            - "I0" - the estimate of the beam intensity on the pupil
+            - "dIdz" - estimate of z-derivative of intensity across the pupil
+            - "zkComp" - the Zernikes used for image compensation
+            - "zkResid" - the estimated residual Zernikes
+            - "zkBest" - the best estimate of the Zernikes after this iteration
+            - "converged" - flag indicating if Zernike estimation has converged
+            - "caustic" - flag indicating if a caustic has been hit
+
+        Note the units for all Zernikes are in meters, and the z-derivative
+        in dIdz is also in meters.
+        """
+        if not self._saveHistory:
+            warnings.warn(
+                "saveHistory is False. If you want the history to be saved, "
+                "run self.config(saveHistory=True)."
+            )
+            return {}
+
+        # If the history exists, return it, otherwise return an empty dict
+        return getattr(self, "_history", {})
+
     def _expSolve(self, I0: np.ndarray, dIdz: np.ndarray) -> np.ndarray:
         """Solve the TIE directly using a Zernike expansion.
 
@@ -289,23 +339,23 @@ class TIEAlgorithm(WfAlgorithm):
 
     def estimateWf(
         self,
-        I1: DonutImage,
-        I2: DonutImage,  # type: ignore[override]
+        I1: DonutStamp,
+        I2: DonutStamp,  # type: ignore[override]
     ) -> np.ndarray:
-        """Return the wavefront Zernike coefficients in nm.
+        """Return the wavefront Zernike coefficients in meters.
 
         Parameters
         ----------
-        I1 : DonutImage
-            An image object containing an intra- or extra-focal donut image.
-        I2 : DonutImage
-            A second image, on the opposite side of focus from I1.
+        I1 : DonutStamp
+            A stamp object containing an intra- or extra-focal donut image.
+        I2 : DonutStamp
+            A second stamp, on the opposite side of focus from I1.
 
         Returns
         -------
         np.ndarray
-            Numpy array of the Zernike coefficients estimated from the image
-            or pair of images.
+            Zernike coefficients (for Noll indices >= 4) estimated from 
+            the images, in meters.
         """
         # If I2 provided, check that I1 and I2 are on opposite sides of focus
         if I2.defocalType == I1.defocalType:
@@ -318,56 +368,96 @@ class TIEAlgorithm(WfAlgorithm):
         # Initialize Zernike arrays at zero
         zkComp = np.zeros(self.jmax - 4 + 1)  # Zernikes for compensation
         zkResid = np.zeros_like(zkComp)  # Residual Zernikes after compensation
+        zkBest = np.zeros_like(zkComp)  # Current best Zernike estimate
 
         # Get the compensation sequence
         compSequence = iter(self.compSequence)
 
+        # Set the caustic and converged flags to False
+        caustic = False
+        converged = False
+
         # Loop through every iteration in the sequence
-        for _ in range(self.maxIter):
+        for i in range(self.maxIter):
             # Determine the maximum Noll index to compensate
             # Once the compensation sequence is exhausted, jmaxComp = jmax
             jmaxComp = next(compSequence, self.jmax)
 
             # Calculate zkComp for this iteration
+            # The gain scales how much of previous residual we incorporate
+            # Everything past jmaxComp is set to zero
             zkComp += self.compGain * zkResid
             zkComp[(jmaxComp - 3) :] = 0
 
             # Compensate images using the Zernikes
-            intraComp = self.imageMapper.imageToPupil(
-                intra.image, intra.defocalType, zkComp
-            )
-            extraComp = self.imageMapper.imageToPupil(
-                extra.image, extra.defocalType, zkComp
-            )
+            intraComp = self.imageMapper.imageToPupil(intra, zkComp).image
+            extraComp = self.imageMapper.imageToPupil(extra, zkComp).image
 
-            # TODO: Check for caustics
+            # Check for caustics
+            if (
+                intraComp.max() <= 0
+                or extraComp.max() <= 0
+                or not np.isfinite(intraComp).all()
+                or not np.isfinite(extraComp).all()
+            ):
+                caustic = True
 
-            # Apply pupil mask
-            # TODO: implement masks that include vignetting and blending
-            mask = self.instrument.createPupilMask(intraComp.shape[0])
-            intraComp *= mask
-            extraComp *= mask
+                # Dummy NaNs for the missing objects
+                I0 = np.full_like(intraComp, np.nan)
+                dIdz = np.full_like(intraComp, np.nan)
+                zkResid = np.nan * zkResid
+                zkBest = np.nan * zkResid
 
-            # Normalize the images
-            intraComp /= intraComp.sum()
-            extraComp /= extraComp.sum()
+            # If no caustic, proceed with Zernike estimation
+            else:
+                # Normalize the images
+                intraComp /= intraComp.sum()
+                extraComp /= extraComp.sum()
 
-            self._intraComp = intraComp
-            self._extraComp = extraComp
+                # Approximate I0 = I(x, 0) and dI/dz = dI(x, z)/dz at z=0
+                I0 = (intraComp + extraComp) / 2
+                dIdz = (intraComp - extraComp) / (
+                    2 * self.instrument.pupilOffset
+                )
 
-            # Approximate I0 = I(x, 0) and dI/dz = dI(x, z)/dz at z=0
-            I0 = (intraComp + extraComp) / 2
-            dIdz = (intraComp - extraComp) / (2 * self.instrument.pupilOffset)
+                # Estimate the Zernikes
+                if self.solver == "exp":
+                    zkResid = self._expSolve(I0, dIdz)
+                elif self.solver == "fft":
+                    zkResid = self._fftSolve(I0, dIdz)
 
-            # Estimate the Zernikes
-            if self.solver == "exp":
-                zkResid = self._expSolve(I0, dIdz)
-            elif self.solver == "fft":
-                zkResid = self._fftSolve(I0, dIdz)
+                # Check for convergence
+                newBest = zkComp + zkResid
+                diffZk = zkBest - newBest
+                if np.sum(np.abs(diffZk)) < 0:
+                    converged = True
 
-            # Update our best estimate of the Zernikes
-            zkBest = zkComp + zkResid
+                # Set the new best estimate
+                zkBest = newBest
 
-            # TODO: Check for convergence
+            # Time to wrap up this iteration!
+            # Should we save intermediate products in the algorithm history?
+            if self._saveHistory:
+                # Save the images and Zernikes from this iteration
+                self._history[i] = {
+                    "intraComp": intraComp.copy(),
+                    "extraComp": extraComp.copy(),
+                    "I0": I0.copy(),
+                    "dIdz": dIdz.copy(),
+                    "zkComp": zkComp.copy(),
+                    "zkResid": zkResid.copy(),
+                    "zkBest": zkBest.copy(),
+                    "converged": converged,
+                    "caustic": caustic,
+                }
+
+                # If we are using the FFT solver, save the inner loop as well
+                if self.solver == "fft":
+                    # TODO: Need to add inner loop here
+                    self._history[i]["innerLoop"] = None
+
+            # If we've hit a caustic or converged, we will stop early
+            if caustic or converged:
+                break
 
         return zkBest
