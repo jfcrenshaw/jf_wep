@@ -1,4 +1,3 @@
-"""Define a class to store all the geometry info we might need."""
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
@@ -169,18 +168,30 @@ class Instrument:
 
     @property
     def pupilMag(self) -> float:
-        """The magnification of the pupil onto the image plane."""
+        """The magnification of the pupil onto the image plane.
+        
+        Note this does not take into account any intrinsic aberrations
+        inherent in the optical system.
+        """
         return self.defocalOffset / self.focalLength
 
     @property
     def donutDiameter(self) -> float:
-        """The expected donut diameter in pixels."""
+        """The expected donut diameter in pixels.
+        
+        Note this does not take into account any intrinsic aberrations
+        inherent in the optical system.
+        """
         return self.pupilMag * self.diameter / self.pixelSize
 
     @property
     def donutRadius(self) -> float:
-        """The expected donut radius in pixels."""
-        return self.pupilMag * self.diameter / self.pixelSize / 2
+        """The expected donut radius in pixels.
+        
+        Note this does not take into account any intrinsic aberrations
+        inherent in the optical system.
+        """
+        return self.donutDiameter / 2
 
     def createPupilGrid(self, nPixels: int) -> Tuple[np.ndarray, np.ndarray]:
         """Create an (nPixel x nPixel) grid for the pupil.
@@ -215,3 +226,67 @@ class Instrument:
         uGrid, vGrid = np.meshgrid(grid, grid)
 
         return uGrid, vGrid
+    
+    def createPupilMask(self, nPixels: int) -> np.ndarray:
+        """Create an (nPixel x nPixel) mask for the pupil.
+
+        The coordinates of the grid are in normalized pupil coordinates.
+        These coordinates are defined such that u^2 + v^2 = 1 is the edge
+        of the pupil, and u^2 + v^2 = obscuration^2 is the edge of the
+        central obscuration.
+
+        Parameters
+        ----------
+        nPixels : int
+            The number of pixels on a side.
+
+        Returns
+        -------
+        np.ndarray
+            The 2D pupil mask
+        """
+        # Get the pupil grid
+        uPupil, vPupil = self.createPupilGrid(nPixels)
+
+        # Calculate distance from center
+        rPupil = np.sqrt(uPupil**2 + vPupil**2)
+
+        # Mask outside the pupil
+        mask = (rPupil >= self.obscuration) & (rPupil <= 1)
+
+        return mask
+    
+    def createMarkedPupilMask(self, nPixels: int) -> np.ndarray:
+        """Create a pupil mask with the positive u and v axes marked.
+        
+        The positive u axis is marked with a circle, and the positive v axis
+        is marked with a diamond. These marks are cutouts in the mask. This
+        is helpful for tracking axis directions in different algorithms.
+
+        Parameters
+        ----------
+        nPixels : int
+            The number of pixels on a side.
+
+        Returns
+        -------
+        np.ndarray
+            The 2D marked pupil mask
+        """
+        # Get the pupil grid
+        uPupil, vPupil = self.createPupilGrid(nPixels)
+
+        # Get the regular pupil mask
+        mask = self.createPupilMask(nPixels)
+
+        # Determine center and radius of markers
+        mCenter = (1 + self.obscuration) / 2
+        mRadius = (1 - self.obscuration) / 4
+
+        # Add circle marker to positive u axis
+        mask = mask & (np.sqrt((uPupil - mCenter) ** 2 + vPupil**2) > mRadius)
+
+        # Add diamond marker to positive v axis
+        mask = mask & (np.abs(uPupil) + np.abs(vPupil - mCenter) > mRadius)
+
+        return mask

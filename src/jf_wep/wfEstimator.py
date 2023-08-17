@@ -189,13 +189,6 @@ class WfEstimator:
         ValueError
             If I1 and I2 are on the same side of focus.
         """
-        # If I2 provided, check that I1 and I2 are on opposite sides of focus
-        if I2 is not None and I2.defocalType == I1.defocalType:
-            raise ValueError(
-                "If you provide I2, it must be on the "
-                "opposite side of focus from I1."
-            )
-
         # Get the estimated wavefront in terms of Zernike coefficients in nm
         zk = self.algo.estimateWf(I1, I2)  # type: ignore
 

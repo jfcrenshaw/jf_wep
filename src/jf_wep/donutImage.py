@@ -50,7 +50,7 @@ class DonutImage:
         fieldAngle: Union[np.ndarray, tuple, list],
         defocalType: Union[DefocalType, str],
         filterLabel: Union[FilterLabel, str],
-        blendOffsets: Union[np.ndarray, tuple, list, None],
+        blendOffsets: Union[np.ndarray, tuple, list, None] = None,
     ) -> None:
         # Set the image
         if not isinstance(image, np.ndarray):
@@ -78,7 +78,7 @@ class DonutImage:
 
         # Set the filter label
         if isinstance(filterLabel, str):
-            self._filterLabel = FilterLabel(defocalType)
+            self._filterLabel = FilterLabel(filterLabel)
         elif isinstance(filterLabel, FilterLabel):
             self._filterLabel = filterLabel
         else:

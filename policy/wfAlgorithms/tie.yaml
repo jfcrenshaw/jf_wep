@@ -1,9 +1,9 @@
 # Default parameters for the TIE algorithm
 
 instConfig: policy/instruments/LsstCam.yaml
-jmax: 22
+jmax: 28
 solver: exp
 opticalModel: paraxial
 maxIter: 14
-compSequence: [4, 4, 6, 6, 13, 13, 13, 13, 22, 22, 22, 22, 22, 22]
+compSequence: [4, 4, 6, 6, 13, 13, 13, 13, 22, 22, 22, 22, 28, 28]
 compGain: 0.6

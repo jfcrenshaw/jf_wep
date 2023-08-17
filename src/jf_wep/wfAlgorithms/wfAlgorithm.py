@@ -11,7 +11,6 @@ import numpy as np
 from jf_wep.donutImage import DonutImage
 from jf_wep.instrument import Instrument
 from jf_wep.utils import mergeParams
-from jf_wep.zernikeObject import ZernikeObject
 
 
 class WfAlgorithm(ABC):
@@ -42,7 +41,6 @@ class WfAlgorithm(ABC):
         self,
         configFile: Union[Path, str, None] = None,
         instConfig: Union[Instrument, Path, str, dict, None] = None,
-        zkConfig: Union[ZernikeObject, Path, str, dict, None] = None,
         **kwargs: Any,
     ) -> None:
         self.config(
@@ -57,7 +55,6 @@ class WfAlgorithm(ABC):
         self,
         configFile: Union[Path, str, None] = None,
         instConfig: Union[Path, str, dict, Instrument, None] = None,
-        zkConfig: Union[Path, str, dict, ZernikeObject, None] = None,
         **kwargs: Any,
     ) -> None:
         """Configure the algorithm.
@@ -68,7 +65,6 @@ class WfAlgorithm(ABC):
         params = mergeParams(  # noqa: F841
             configFile,
             instConfig=instConfig,
-            zkConfig=zkConfig,
             **kwargs,
         )
 

@@ -1,5 +1,4 @@
 """Define the classes associated with the TIE solver."""
-import warnings
 from pathlib import Path
 from typing import Iterable, Optional, Union
 
@@ -7,9 +6,15 @@ import numpy as np
 
 from jf_wep.donutImage import DonutImage
 from jf_wep.instrument import Instrument
-from jf_wep.utils import DefocalType, ImageMapper, loadConfig, mergeParams
+from jf_wep.utils import (
+    DefocalType,
+    ImageMapper,
+    loadConfig,
+    mergeParams,
+    createZernikeBasis,
+    createZernikeGradBasis,
+)
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
-from jf_wep.zernikeObject import ZernikeObject
 
 
 class TIEAlgorithm(WfAlgorithm):
@@ -27,12 +32,6 @@ class TIEAlgorithm(WfAlgorithm):
         points to a config file, which is used to configure the Instrument.
         If a dictionary, it is assumed to hold keywords for configuration.
         If an Instrument object, that object is just used.
-    jmax : int, optional
-        Maximum Zernike Noll index for which to solve.
-    solver : str, optional
-        Method used to solve the TIE. If "exp", the TIE is solved via
-        directly expanding the wavefront in a Zernike series. If "fft",
-        the TIE is solved using fast Fourier transforms.
     opticalModel : str, optional
         The optical model used for image compensation. If "paraxial", the
         original algorithm from Rodier & Rodier (1993) is used, which is
@@ -41,6 +40,12 @@ class TIEAlgorithm(WfAlgorithm):
         (i.e. fast optics) introduced by Xin (2015) is used. If "offAxis",
         an empirical compensation polynomial is used. This is suitable for
         fast telescopes, far from the optical axis.
+    solver : str, optional
+        Method used to solve the TIE. If "exp", the TIE is solved via
+        directly expanding the wavefront in a Zernike series. If "fft",
+        the TIE is solved using fast Fourier transforms.
+    jmax : int, optional
+        Maximum Zernike Noll index for which to solve.
     maxIter : int, optional
         The maximum number of iterations of the TIE loop.
     compSequence : iterable, optional
@@ -62,9 +67,9 @@ class TIEAlgorithm(WfAlgorithm):
         self,
         configFile: Union[Path, str, None] = "policy/wfAlgorithms/tie.yaml",
         instConfig: Union[Path, str, dict, Instrument, None] = None,
-        jmax: Optional[int] = None,
-        solver: Optional[str] = None,
         opticalModel: Optional[str] = None,
+        solver: Optional[str] = None,
+        jmax: Optional[int] = None,
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
         compGain: Optional[float] = None,
@@ -72,9 +77,9 @@ class TIEAlgorithm(WfAlgorithm):
         self.config(
             configFile=configFile,
             instConfig=instConfig,
-            jmax=jmax,
-            solver=solver,
             opticalModel=opticalModel,
+            solver=solver,
+            jmax=jmax,
             maxIter=maxIter,
             compSequence=compSequence,
             compGain=compGain,
@@ -84,9 +89,9 @@ class TIEAlgorithm(WfAlgorithm):
         self,
         configFile: Union[Path, str, None] = None,
         instConfig: Union[Path, str, dict, Instrument, None] = None,
-        jmax: Optional[int] = None,
-        solver: Optional[str] = None,
         opticalModel: Optional[str] = None,
+        solver: Optional[str] = None,
+        jmax: Optional[int] = None,
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
         compGain: Optional[float] = None,
@@ -99,9 +104,9 @@ class TIEAlgorithm(WfAlgorithm):
         params = mergeParams(
             configFile,
             instConfig=instConfig,
-            jmax=jmax,
-            solver=solver,
             opticalModel=opticalModel,
+            solver=solver,
+            jmax=jmax,
             maxIter=maxIter,
             compSequence=compSequence,
             compGain=compGain,
@@ -112,11 +117,12 @@ class TIEAlgorithm(WfAlgorithm):
         if instConfig is not None:
             self._instrument = loadConfig(instConfig, Instrument)
 
-        # Create the Zernike object
-        jmax = params["jmax"]
-        if jmax is not None:
-            self._zernikeObject = ZernikeObject(
-                jmax=jmax,
+        # Set the image mapper
+        opticalModel = params["opticalModel"]
+        if opticalModel is not None:
+            self._imageMapper = ImageMapper(
+                configFile=None,
+                opticalModel=opticalModel,
                 instConfig=self.instrument,
             )
 
@@ -131,9 +137,16 @@ class TIEAlgorithm(WfAlgorithm):
                 )
             self._solver = solver
 
-        # Create the compensator
-        # Allow ImageMapper to handle parameter validation
-        warnings.warn("ImageMapper not configured!")
+        # Set jmax
+        jmax = params["jmax"]
+        if jmax is not None:
+            if not isinstance(jmax, int) and not (
+                isinstance(jmax, float) and int(jmax) == jmax
+            ):
+                raise TypeError("jmax must be an integer")
+            if jmax < 4:
+                raise ValueError("jmax must be >= 4.")
+            self._jmax = int(jmax)
 
         # Set maxIter
         maxIter = params["maxIter"]
@@ -171,17 +184,17 @@ class TIEAlgorithm(WfAlgorithm):
         return self._instrument
 
     @property
-    def zernikeObject(self) -> ZernikeObject:
-        """Return the ZernikeObject."""
-        return self._zernikeObject
+    def imageMapper(self) -> ImageMapper:
+        """Return the ImageMapper."""
+        return self._imageMapper
 
     @property
-    def jmax(self) -> int:
-        """Return the maximum Zernike Noll index.
+    def opticalModel(self) -> str:
+        """Return the optical model.
 
         For details about this parameter, see the class docstring.
         """
-        return self.zernikeObject.jmax
+        return self.imageMapper.opticalModel
 
     @property
     def solver(self) -> Union[str, None]:
@@ -192,12 +205,12 @@ class TIEAlgorithm(WfAlgorithm):
         return self._solver
 
     @property
-    def opticalModel(self) -> Union[str, None]:
-        """Return the optical model of the TIECompensator.
+    def jmax(self) -> int:
+        """Return the maximum Zernike Noll index.
 
         For details about this parameter, see the class docstring.
         """
-        return self.compensator.opticalModel
+        return self._jmax
 
     @property
     def maxIter(self) -> int:
@@ -231,7 +244,7 @@ class TIEAlgorithm(WfAlgorithm):
         I0
             The beam intensity at the exit pupil
         dIdz
-            The gradient of the beam intensity across the exit pupil
+            The z-derivative of the beam intensity across the exit pupil
 
         Returns
         -------
@@ -239,7 +252,22 @@ class TIEAlgorithm(WfAlgorithm):
             Numpy array of the Zernike coefficients estimated from the image
             or pair of images, in nm.
         """
-        raise NotImplementedError
+        # Get Zernike Bases
+        zk = createZernikeBasis(self.jmax, self.instrument, I0.shape[0])
+        dzkdu, dzkdv = createZernikeGradBasis(
+            self.jmax, self.instrument, I0.shape[0]
+        )
+
+        # Calculate quantities for the linear equation
+        b = -np.einsum("ab,jab->j", dIdz, zk, optimize=True)
+        M = np.einsum("ab,jab,kab->jk", I0, dzkdu, dzkdu, optimize=True)
+        M += np.einsum("ab,jab,kab->jk", I0, dzkdv, dzkdv, optimize=True)
+        M /= self.instrument.radius**2
+
+        # Invert to get Zernike coefficients in meters
+        zkCoeff, *_ = np.linalg.lstsq(M, b, rcond=None)
+
+        return zkCoeff
 
     def _fftSolve(self, I0: np.ndarray, dIdz: np.ndarray) -> np.ndarray:
         """Solve the TIE using fast Fourier transforms.
@@ -279,6 +307,10 @@ class TIEAlgorithm(WfAlgorithm):
             Numpy array of the Zernike coefficients estimated from the image
             or pair of images.
         """
+        # If I2 provided, check that I1 and I2 are on opposite sides of focus
+        if I2.defocalType == I1.defocalType:
+            raise ValueError("I1 and I2 must be on opposite sides of focus.")
+
         # Assign the intra and extrafocal images
         intra = I1 if I1.defocalType == DefocalType.Intra else I2
         extra = I1 if I1.defocalType == DefocalType.Extra else I2
@@ -291,8 +323,9 @@ class TIEAlgorithm(WfAlgorithm):
         compSequence = iter(self.compSequence)
 
         # Loop through every iteration in the sequence
-        for _ in range(self.jmax):
-            # Determine the maximum Noll index to compensate for
+        for _ in range(self.maxIter):
+            # Determine the maximum Noll index to compensate
+            # Once the compensation sequence is exhausted, jmaxComp = jmax
             jmaxComp = next(compSequence, self.jmax)
 
             # Calculate zkComp for this iteration
@@ -300,11 +333,27 @@ class TIEAlgorithm(WfAlgorithm):
             zkComp[(jmaxComp - 3) :] = 0
 
             # Compensate images using the Zernikes
-            intraPupil = self.imageMapper.imageToPupil(intra.image, intra.defocalType, zkComp)
-            extraPupil = self.imageMapper.imageToPupil(extra.image, extra.defocalType, zkComp)
+            intraComp = self.imageMapper.imageToPupil(
+                intra.image, intra.defocalType, zkComp
+            )
+            extraComp = self.imageMapper.imageToPupil(
+                extra.image, extra.defocalType, zkComp
+            )
 
-            warnings.warn("\nNEED TO CHECK FOR CAUSTICS.\n")
-            warnings.warn("\nNOT CURRENTLY APPLYING PUPIL MASK.\n")
+            # TODO: Check for caustics
+
+            # Apply pupil mask
+            # TODO: implement masks that include vignetting and blending
+            mask = self.instrument.createPupilMask(intraComp.shape[0])
+            intraComp *= mask
+            extraComp *= mask
+
+            # Normalize the images
+            intraComp /= intraComp.sum()
+            extraComp /= extraComp.sum()
+
+            self._intraComp = intraComp
+            self._extraComp = extraComp
 
             # Approximate I0 = I(x, 0) and dI/dz = dI(x, z)/dz at z=0
             I0 = (intraComp + extraComp) / 2
@@ -319,6 +368,6 @@ class TIEAlgorithm(WfAlgorithm):
             # Update our best estimate of the Zernikes
             zkBest = zkComp + zkResid
 
-            warnings.warn("\nCHECK FOR CONVERGENCE.\n")
+            # TODO: Check for convergence
 
         return zkBest
