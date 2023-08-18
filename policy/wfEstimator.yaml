@@ -2,8 +2,5 @@
 # see the docstring for definitions of parameters
 
 algo: tie
-algo_params: null
-instParams: policy/instruments/LsstCam.yaml
-jmax: 22
+algoConfig: null
 units: nm
-shapeMode: strict

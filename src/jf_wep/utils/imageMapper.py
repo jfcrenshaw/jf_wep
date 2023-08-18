@@ -331,8 +331,8 @@ class ImageMapper:
 
         # First, we want an inner mask that we will use to set the intensity
         # inside the obscuration to zero. We will still project these points
-        # onto the image plane, though, so the interpolator knows that the
-        # interior of the obscuration has zero flux
+        # onto the image plane so that the interpolator knows the interior 
+        # of the obscuration has zero flux
         rPupil = np.sqrt(uPupil**2 + vPupil**2)
         innerMask = rPupil > self.instrument.obscuration
         

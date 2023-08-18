@@ -10,7 +10,7 @@ import numpy as np
 
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils.paramReaders import mergeParams
+from jf_wep.utils.paramReaders import loadConfig, mergeParams
 
 
 class WfAlgorithm(ABC):
@@ -38,32 +38,34 @@ class WfAlgorithm(ABC):
         instConfig: Union[Instrument, Path, str, dict, None] = None,
         **kwargs: Any,
     ) -> None:
-        self.config(
-            configFile=configFile,
-            instConfig=instConfig,
-            **kwargs,
-        )
-
-    @abstractmethod
-    def config(
-        self,
-        configFile: Union[Path, str, None] = None,
-        instConfig: Union[Path, str, dict, Instrument, None] = None,
-        **kwargs: Any,
-    ) -> None:
-        """Configure the algorithm.
-
-        For details on the parameters, see the class docstring.
-        """
-        # Merge keyword arguments with the default parameters
-        params = mergeParams(  # noqa: F841
+        # Merge keyword arguments with defaults from configFile
+        params = mergeParams(
             configFile,
             instConfig=instConfig,
             **kwargs,
         )
 
-        # Rest of configuration
-        ...
+        # Configure the instrument
+        self.configInstrument(params.pop("instConfig"))
+
+        # Configure other parameters
+        for key, value in params.items():
+            setattr(self, key, value)
+
+    def configInstrument(self, instConfig: Union[Instrument, Path, str, dict]) -> None:
+        """Configure the instrument.
+        
+        For details about this parameter, see the class docstring.
+        """
+        self._instrument = loadConfig(instConfig, Instrument)
+
+    @property
+    def instrument(self) -> Instrument:
+        """Return the instrument object.
+
+        For details about this parameter, see the class docstring.
+        """
+        return self._instrument
 
     @abstractmethod
     def estimateWf(

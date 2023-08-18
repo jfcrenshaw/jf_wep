@@ -8,7 +8,6 @@ from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
 from jf_wep.utils.enums import DefocalType
 from jf_wep.utils.imageMapper import ImageMapper
-from jf_wep.utils.paramReaders import loadConfig, mergeParams
 from jf_wep.utils.zernikes import createZernikeBasis, createZernikeGradBasis
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
 
@@ -77,7 +76,7 @@ class TIEAlgorithm(WfAlgorithm):
         compGain: Optional[float] = None,
         saveHistory: Optional[bool] = None,
     ) -> None:
-        self.config(
+        super().__init__(
             configFile=configFile,
             instConfig=instConfig,
             opticalModel=opticalModel,
@@ -89,121 +88,8 @@ class TIEAlgorithm(WfAlgorithm):
             saveHistory=saveHistory,
         )
 
-    def config(  # type: ignore[override]
-        self,
-        configFile: Union[Path, str, None] = None,
-        instConfig: Union[Path, str, dict, Instrument, None] = None,
-        opticalModel: Optional[str] = None,
-        solver: Optional[str] = None,
-        jmax: Optional[int] = None,
-        maxIter: Optional[int] = None,
-        compSequence: Optional[Iterable] = None,
-        compGain: Optional[float] = None,
-        saveHistory: Optional[bool] = None,
-    ) -> None:
-        """Configure the TIE solver.
-
-        For details on the parameters, see the class docstring.
-        """
-        # Merge keyword arguments with the default parameters
-        params = mergeParams(
-            configFile,
-            instConfig=instConfig,
-            opticalModel=opticalModel,
-            solver=solver,
-            jmax=jmax,
-            maxIter=maxIter,
-            compSequence=compSequence,
-            compGain=compGain,
-            saveHistory=saveHistory,
-        )
-
-        # Set the instrument
-        instConfig = params["instConfig"]
-        if instConfig is not None:
-            self._instrument = loadConfig(instConfig, Instrument)
-
-        # Set the image mapper
-        opticalModel = params["opticalModel"]
-        if opticalModel is not None:
-            self._imageMapper = ImageMapper(
-                configFile=None,
-                opticalModel=opticalModel,
-                instConfig=self.instrument,
-            )
-
-        # Set the solver
-        solver = params["solver"]
-        if solver is not None:
-            allowed_solvers = ["exp", "fft"]
-            if solver not in allowed_solvers:
-                raise ValueError(
-                    f"Solver '{solver}' not supported. "
-                    f"Please choose one of {str(allowed_solvers)[1:-1]}."
-                )
-            self._solver = solver
-
-        # Set jmax
-        jmax = params["jmax"]
-        if jmax is not None:
-            if not isinstance(jmax, int) and not (
-                isinstance(jmax, float) and int(jmax) == jmax
-            ):
-                raise TypeError("jmax must be an integer")
-            if jmax < 4:
-                raise ValueError("jmax must be >= 4.")
-            self._jmax = int(jmax)
-
-        # Set maxIter
-        maxIter = params["maxIter"]
-        if maxIter is not None:
-            if not isinstance(maxIter, int) or (
-                isinstance(maxIter, float) and maxIter % 1 != 0
-            ):
-                raise TypeError("maxIter must be an integer.")
-            if maxIter < 0:
-                raise ValueError("maxIter must be non-negative.")
-            self._maxIter = int(maxIter)
-
-        # Set compSequence
-        compSequence = params["compSequence"]
-        if compSequence is not None:
-            compSequence = np.array(compSequence, dtype=int)
-            if compSequence.ndim != 1:
-                raise ValueError("compSequence must be a 1D iterable.")
-            self._compSequence = compSequence
-
-        # Set compGain
-        compGain = params["compGain"]
-        if compGain is not None:
-            compGain = float(compGain)
-            if compGain <= 0:
-                raise ValueError("compGain must be positive.")
-            self._compGain = compGain
-
-        # Set whether to save the algorithm history
-        saveHistory = params["saveHistory"]
-        if saveHistory is not None:
-            if not isinstance(saveHistory, bool):
-                raise TypeError("saveHistory must be a bool.")
-            self._saveHistory = saveHistory
-
-            # If we are turning history-saving off, delete any old history
-            # This is to avoid confusion
-            self._history = {}  # type: ignore
-
-    @property
-    def instrument(self) -> Instrument:
-        """Return the instrument object.
-
-        For details about this parameter, see the class docstring.
-        """
-        return self._instrument
-
-    @property
-    def imageMapper(self) -> ImageMapper:
-        """Return the ImageMapper."""
-        return self._imageMapper
+        # Instantiate an empty history
+        self._history = {}  # type: ignore
 
     @property
     def opticalModel(self) -> str:
@@ -213,6 +99,20 @@ class TIEAlgorithm(WfAlgorithm):
         """
         return self.imageMapper.opticalModel
 
+    @opticalModel.setter
+    def opticalModel(self, value: str) -> None:
+        """Set the opticalModel."""
+        self._imageMapper = ImageMapper(
+            configFile=None,
+            opticalModel=value,
+            instConfig=self.instrument,
+        )
+
+    @property
+    def imageMapper(self) -> ImageMapper:
+        """Return the ImageMapper."""
+        return self._imageMapper
+
     @property
     def solver(self) -> Union[str, None]:
         """Return the name of the TIE solver.
@@ -221,6 +121,17 @@ class TIEAlgorithm(WfAlgorithm):
         """
         return self._solver
 
+    @solver.setter
+    def solver(self, value: str) -> None:
+        """Set the solver."""
+        allowed_solvers = ["exp", "fft"]
+        if value not in allowed_solvers:
+            raise ValueError(
+                f"Solver '{value}' not supported. "
+                f"Please choose one of {str(allowed_solvers)[1:-1]}."
+            )
+        self._solver = value
+            
     @property
     def jmax(self) -> int:
         """Return the maximum Zernike Noll index.
@@ -228,6 +139,17 @@ class TIEAlgorithm(WfAlgorithm):
         For details about this parameter, see the class docstring.
         """
         return self._jmax
+
+    @jmax.setter
+    def jmax(self, value: int) -> None:
+        """Set jmax."""
+        if not isinstance(value, int) and not (
+            isinstance(value, float) and int(value) == value
+        ):
+            raise TypeError("jmax must be an integer")
+        if value < 4:
+            raise ValueError("jmax must be >= 4.")
+        self._jmax = int(value)
 
     @property
     def maxIter(self) -> int:
@@ -237,6 +159,17 @@ class TIEAlgorithm(WfAlgorithm):
         """
         return self._maxIter
 
+    @maxIter.setter
+    def maxIter(self, value: int) -> None:
+        """Set maxIter."""
+        if not isinstance(value, int) or (
+            isinstance(value, float) and value % 1 != 0
+        ):
+            raise TypeError("maxIter must be an integer.")
+        if value < 0:
+            raise ValueError("maxIter must be non-negative.")
+        self._maxIter = int(value)
+
     @property
     def compSequence(self) -> np.ndarray:
         """Return the compensation sequence for the TIE loop.
@@ -245,6 +178,14 @@ class TIEAlgorithm(WfAlgorithm):
         """
         return self._compSequence
 
+    @compSequence.setter
+    def compSequence(self, value: Iterable) -> None:
+        """Set compSequence."""
+        value = np.array(value, dtype=int)
+        if value.ndim != 1:
+            raise ValueError("compSequence must be a 1D iterable.")
+        self._compSequence = value
+
     @property
     def compGain(self) -> float:
         """Return the compensation gain for the TIE loop.
@@ -252,6 +193,31 @@ class TIEAlgorithm(WfAlgorithm):
         For details about this parameter, see the class docstring.
         """
         return self._compGain
+
+    @compGain.setter
+    def compGain(self, value: float) -> None:
+        """Set compGain."""
+        value = float(value)
+        if value <= 0:
+            raise ValueError("compGain must be positive.")
+        self._compGain = value
+
+    @property
+    def saveHistory(self) -> bool:
+        """Return the bool indicating whether the algorithm history is saved."""
+        return self._saveHistory
+
+    @saveHistory.setter
+    def saveHistory(self, value: bool) -> None:
+        """Set saveHistory."""
+        if not isinstance(value, bool):
+            raise TypeError("saveHistory must be a bool.")
+        self._saveHistory = value
+
+        # If we are turning history-saving off, delete any old history
+        # This is to avoid confusion
+        if value is False:
+            self._history = {}
 
     @property
     def history(self) -> dict:
@@ -281,10 +247,8 @@ class TIEAlgorithm(WfAlgorithm):
                 "saveHistory is False. If you want the history to be saved, "
                 "run self.config(saveHistory=True)."
             )
-            return {}
 
-        # If the history exists, return it, otherwise return an empty dict
-        return getattr(self, "_history", {})
+        return self._history
 
     def _expSolve(self, I0: np.ndarray, dIdz: np.ndarray) -> np.ndarray:
         """Solve the TIE directly using a Zernike expansion.
