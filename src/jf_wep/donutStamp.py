@@ -31,19 +31,6 @@ class DonutStamp:
         in pixels. Must be provided in the format [dxList, dyList].
         The lengths of dxList and dyList must be the same.
         (the default is an empty array, i.e. no blends)
-
-    Raises
-    ------
-    TypeError
-        image is not a numpy array
-    ValueError
-        image array is not square
-    ValueError
-        fieldAngle cannot be cast to float array or has wrong shape
-    TypeError
-        defocalType is not a DefocalType Enum or a string
-    TypeError
-        filterLabel is not a FilterLabel Enum or a string
     """
 
     def __init__(

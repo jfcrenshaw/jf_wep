@@ -253,6 +253,6 @@ class Instrument:
         mask &= np.sqrt((uPupil - mCenter) ** 2 + vPupil**2) > mRadius
 
         # Add diamond marker to positive v axis
-        mask &= (np.abs(uPupil) + np.abs(vPupil - mCenter) > mRadius)
+        mask &= np.abs(uPupil) + np.abs(vPupil - mCenter) > mRadius
 
         return mask

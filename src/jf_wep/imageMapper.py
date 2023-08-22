@@ -36,7 +36,7 @@ class ImageMapper:
 
     def __init__(
         self,
-        configFile: Union[Path, str, None] = "policy/utils/imageMapper.yaml",
+        configFile: Union[Path, str, None] = "policy/imageMapper.yaml",
         instConfig: Union[Path, str, dict, Instrument, None] = None,
         addIntrinsic: Optional[bool] = None,
     ) -> None:
