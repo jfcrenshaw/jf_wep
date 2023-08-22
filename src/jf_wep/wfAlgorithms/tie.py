@@ -1,17 +1,15 @@
 """Define the classes associated with the TIE solver."""
+import warnings
 from pathlib import Path
 from typing import Iterable, Optional, Union
 
 import numpy as np
 
 from jf_wep.donutStamp import DonutStamp
+from jf_wep.imageMapper import ImageMapper
 from jf_wep.instrument import Instrument
-from jf_wep.utils.enums import DefocalType
-from jf_wep.utils.imageMapper import ImageMapper
-from jf_wep.utils.zernikes import createZernikeBasis, createZernikeGradBasis
+from jf_wep.utils import DefocalType, createZernikeBasis, createZernikeGradBasis
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
-
-import warnings
 
 
 class TIEAlgorithm(WfAlgorithm):

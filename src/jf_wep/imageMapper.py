@@ -11,9 +11,7 @@ from scipy.spatial import ConvexHull, Delaunay
 
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils.enums import DefocalType
-from jf_wep.utils.paramReaders import loadConfig, mergeParams
-from jf_wep.utils.zernikes import zernikeGradEval
+from jf_wep.utils import DefocalType, loadConfig, mergeParams, zernikeGradEval
 
 
 class ImageMapper:

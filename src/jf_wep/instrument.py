@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
-from jf_wep.utils.paramReaders import mergeParams
+from jf_wep.utils import mergeParams
 
 
 class Instrument:

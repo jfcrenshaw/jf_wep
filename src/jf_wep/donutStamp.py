@@ -5,7 +5,7 @@ from typing import Union
 import numpy as np
 from typing_extensions import Self
 
-from jf_wep.utils.enums import DefocalType, FilterLabel
+from jf_wep.utils import DefocalType, FilterLabel
 
 
 class DonutStamp:

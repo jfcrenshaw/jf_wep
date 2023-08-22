@@ -10,7 +10,7 @@ import numpy as np
 
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils.paramReaders import loadConfig, mergeParams
+from jf_wep.utils import loadConfig, mergeParams
 
 
 class WfAlgorithm(ABC):
