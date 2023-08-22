@@ -7,6 +7,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 from scipy.interpolate import griddata, interpn
+from scipy.spatial import ConvexHull, Delaunay
 
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
@@ -25,72 +26,41 @@ class ImageMapper:
         path starts with "policy/", it will look in the policy directory.
         Any explicitly passed parameters override values found in this file
         (the default is policy/utils/imageMapper.yaml)
-    opticalModel : str, optional
-        The optical model used for image compensation. If "paraxial", the
-        original algorithm from Rodier & Rodier (1993) is used, which is
-        suitable for images near the optical axis on telescope with large
-        focal ratios. If "onAxis", the modification for small focal ratios
-        (i.e. fast optics) introduced by Xin (2015) is used. If "offAxis",
-        an empirical compensation polynomial is used. This is suitable for
-        fast telescopes, far from the optical axis.
     instConfig : Path or str or dict or Instrument, optional
         Instrument configuration. If a Path or string, it is assumed this
         points to a config file, which is used to configure the Instrument.
         If a dictionary, it is assumed to hold keywords for configuration.
         If an Instrument object, that object is just used.
+    addIntrinsic : bool, optional
+        Whether to explicitly add the intrinsic Zernike coefficients to
+        the Zernike coefficients provided for image mapping.
     """
 
     def __init__(
         self,
         configFile: Union[Path, str, None] = "policy/utils/imageMapper.yaml",
-        opticalModel: Optional[str] = None,
         instConfig: Union[Path, str, dict, Instrument, None] = None,
+        addIntrinsic: Optional[bool] = None,
     ) -> None:
-        self.config(
-            configFile=configFile,
-            opticalModel=opticalModel,
-            instConfig=instConfig,
-        )
-
-    def config(
-        self,
-        configFile: Union[Path, str, None] = None,
-        opticalModel: Optional[str] = None,
-        instConfig: Union[Path, str, dict, Instrument, None] = None,
-    ) -> None:
-        """Configure the image mapper.
-
-        For details on the parameters, see the class docstring.
-        """
+        # Merge keyword arguments with defaults from configFile
         params = mergeParams(
             configFile,
-            opticalModel=opticalModel,
             instConfig=instConfig,
+            addIntrinsic=addIntrinsic,
         )
 
-        # Set the optical model
-        opticalModel = params["opticalModel"]
-        if opticalModel is not None:
-            allowed_opticalModels = ["paraxial", "onAxis", "offAxis"]
-            if opticalModel not in allowed_opticalModels:
-                raise ValueError(
-                    f"optical model '{opticalModel}' not supported. "
-                    f"Please choose one of {str(allowed_opticalModels)[1:-1]}."
-                )
-            self._opticalModel = opticalModel
+        # Configure the instrument
+        self.configInstrument(params["instConfig"])
 
-        # Set the instrument
-        instConfig = params["instConfig"]
-        if instConfig is not None:
-            self._instrument = loadConfig(instConfig, Instrument)
+        # Set the addIntrinsic flag
+        self.addIntrinsic = params["addIntrinsic"]
 
-    @property
-    def opticalModel(self) -> str:
-        """Return the optical model.
-
+    def configInstrument(self, instConfig: Union[Instrument, Path, str, dict]) -> None:
+        """Configure the instrument.
+        
         For details about this parameter, see the class docstring.
         """
-        return self._opticalModel
+        self._instrument = loadConfig(instConfig, Instrument)
 
     @property
     def instrument(self) -> Instrument:
@@ -99,6 +69,20 @@ class ImageMapper:
         For details about this parameter, see the class docstring.
         """
         return self._instrument
+
+    @property
+    def addIntrinsic(self) -> bool:
+        """Flag indicating whether intrinsic Zernikes are explicitly added.
+
+        For details about this parameter, see the class docstring.
+        """
+        return self._addIntrinsic
+    
+    @addIntrinsic.setter
+    def addIntrinsic(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("addIntrinic must be a bool.")
+        self._addIntrinsic = value
 
     def _addIntrinsicZernikes(
         self, fieldAngle: np.ndarray, zkCoeff: np.ndarray
@@ -123,7 +107,7 @@ class ImageMapper:
             aberrations incorporated
         """
         # In paraxial mode, we assume the intrinsic Zernikes are zero
-        if self.opticalModel == "paraxial":
+        if not self.addIntrinsic:
             return zkCoeff
 
         # In the off axis model, we need to load from parameter files
@@ -136,18 +120,18 @@ class ImageMapper:
         band = "r"
         telescope = batoid.Optic.fromYaml(f"LSST_{band}.yaml")
         bandpass = galsim.Bandpass(f"LSST_{band}.dat", wave_type="nm")
+        wavelength = bandpass.effective_wavelength * 1e-9
 
         # TODO: add field dependence here
         zkIntrinsic = (
-            batoid.zernikeTA(
+            batoid.zernike(
                 telescope,
                 *np.deg2rad(fieldAngle),
-                bandpass.effective_wavelength * 1e-9,
-                jmax=28,
+                wavelength,
+                jmax=66,
                 eps=telescope.pupilObscuration,
             )
-            * bandpass.effective_wavelength
-            * 1e-9
+            * wavelength
         )[4:]
 
         # Make sure the two Zernike arrays are the same length and add them
@@ -194,10 +178,9 @@ class ImageMapper:
         zkMap = self._addIntrinsicZernikes(donutStamp.fieldAngle, zkCoeff)
 
         # Get instrument geometry info
-        f = self.instrument.focalLength
-        R = self.instrument.radius
-        obscuration = self.instrument.obscuration
+        N = self.instrument.focalRatio
         l = self.instrument.defocalOffset  # noqa: E741
+        obscuration = self.instrument.obscuration
 
         # Determine defocal sign from the image plane at z = f +/- l
         # I.e., the extrafocal image at z = f + l is associated with +1,
@@ -207,6 +190,7 @@ class ImageMapper:
         # Get a regular (normalized) grid on the pupil
         nPixels = donutStamp.image.shape[0]
         uPupil, vPupil = self.instrument.createPupilGrid(nPixels)
+        rPupil = np.sqrt(uPupil**2 + vPupil**2)
 
         # Calculate all 1st- and 2nd-order Zernike derivatives
         d1Wdu = zernikeGradEval(
@@ -269,31 +253,130 @@ class ImageMapper:
             obscuration=obscuration,
         )
 
-        # Calculate A, B, and every permutation of C
-        A = uPupil**2 + vPupil**2 + (f / R) ** 2
-        B = (f + defocalSign * l) / (l * R) * np.sqrt(A)
-        Cuu = uPupil / A * d1Wdu + d2Wdudu
-        Cuv = uPupil / A * d1Wdv + d2Wdudv
-        Cvu = vPupil / A * d1Wdu + d2Wdvdu
-        Cvv = vPupil / A * d1Wdv + d2Wdvdv
-
-        # Map the pupil grid to the image grid
-        uImage = -defocalSign * uPupil - B * d1Wdu
-        vImage = -defocalSign * vPupil - B * d1Wdv
+        # Map the pupil grid onto the image plane
+        with np.errstate(invalid='ignore'):
+            prefactor = np.sqrt((4 * N**2 - 1) / (4 * N**2 - rPupil**2))
+        uImage = prefactor * (-defocalSign * uPupil - 4 * N**2 / l * d1Wdu)
+        vImage = prefactor * (-defocalSign * vPupil - 4 * N**2 / l * d1Wdv)
 
         # Center the image of the pupil
-        centerShiftScale = -f * (f + defocalSign * l) / (l * R**2)
-        uImage -= centerShiftScale * d1Wdu0
-        vImage -= centerShiftScale * d1Wdv0
+        uImage += np.sqrt(4 * N**2 - 1) * 2 * N / l * d1Wdu0
+        vImage += np.sqrt(4 * N**2 - 1) * 2 * N / l * d1Wdv0
 
-        # And the determinant of the Jacobian
-        detJac = (
-            1
-            + (defocalSign * B) * (Cuu + Cvv)
-            + (defocalSign * B) ** 2 * (Cuu * Cvv - Cuv * Cvu)
+        # Calculate the Jacobian
+        J00 = uPupil * uImage / (4 * N**2 - rPupil**2) - prefactor * (
+            defocalSign + 4 * N**2 / l * d2Wdudu
+        )
+        J01 = (
+            vPupil * uImage / (4 * N**2 - rPupil**2)
+            - prefactor * 4 * N**2 / l * d2Wdvdu
+        )
+        J10 = (
+            uPupil * vImage / (4 * N**2 - rPupil**2)
+            - prefactor * 4 * N**2 / l * d2Wdudv
+        )
+        J11 = vPupil * vImage / (4 * N**2 - rPupil**2) - prefactor * (
+            defocalSign + 4 * N**2 / l * d2Wdvdv
         )
 
+        # And the determinant
+        detJac = J00 * J11 - J01 * J10
+
         return uPupil, vPupil, uImage, vImage, detJac
+
+    def _createImageMask(
+        self,
+        uPupil: np.ndarray,
+        vPupil: np.ndarray,
+        uImage: np.ndarray,
+        vImage: np.ndarray,
+    ) -> np.ndarray:
+        """Map the pupil mask to the image plane.
+
+        This is the private version of self.createImageMask() that
+        assumes you have already created the mapping between the
+        pupil and image planes.
+
+        Parameters
+        ----------
+        np.ndarray
+            Normalized x coordinates of the pupil grid
+        np.ndarray
+            Normalized y coordinates of the pupil grid
+        np.ndarray
+            Normalized x coordinates on the image plane
+        np.ndarray
+            Normalized y coordinates on the image plane
+
+        Returns
+        -------
+        np.ndarray
+            The mask array.
+        """
+        # Unravel the grid points to be used below
+        gridPoints = np.transpose((uPupil.ravel(), vPupil.ravel()))
+
+        # Create inner and outer masks
+        rPupil = np.sqrt(uPupil**2 + vPupil**2)
+        innerMask = rPupil <= self.instrument.obscuration
+        outerMask = rPupil <= 1
+
+        # Find the convex hull of the inner mask mapped to the image plane,
+        # and use that as the inner image mask
+        innerMaskPts = np.transpose(
+            (uImage[innerMask].ravel(), vImage[innerMask].ravel())
+        )
+        innerHull = ConvexHull(innerMaskPts)
+        innerDeln = Delaunay(innerMaskPts[innerHull.vertices])
+        innerMask = (
+            innerDeln.find_simplex(gridPoints).reshape(uPupil.shape) >= 0
+        )
+
+        # Find the convex hull of the outer mask mapped to the image plane,
+        # and use that as the outer image mask
+        outerMaskPts = np.transpose(
+            (uImage[outerMask].ravel(), vImage[outerMask].ravel())
+        )
+        outerHull = ConvexHull(outerMaskPts)
+        outerDeln = Delaunay(outerMaskPts[outerHull.vertices])
+        outerMask = (
+            outerDeln.find_simplex(gridPoints).reshape(uPupil.shape) >= 0
+        )
+
+        # Combine the masks
+        imageMask = outerMask & ~innerMask
+
+        return imageMask
+
+    def createImageMask(
+        self,
+        donutStamp: DonutStamp,
+        zkCoeff: np.ndarray = np.zeros(1),
+    ) -> np.ndarray:
+        """Create an image mask for the donut stamp.
+
+        Parameters
+        ----------
+        donutStamp : DonutStamp
+            The stamp object for which the image mask is created.
+        zkCoeff : np.ndarray, optional
+            The wavefront at the pupil, represented as Zernike coefficients
+            in meters, for Noll indices >= 4. Note this is in addition to
+            the intrinsic wavefront aberration.
+            (the default is zero)
+
+        Returns
+        -------
+        np.ndarray
+            The mask array.
+        """
+        # Construct the map between the pupil and image planes
+        uPupil, vPupil, uImage, vImage, detJac = self._constructMap(
+            donutStamp,
+            zkCoeff,
+        )
+
+        return self._createImageMask(uPupil, vPupil, uImage, vImage)
 
     def pupilToImage(
         self,
@@ -323,40 +406,27 @@ class ImageMapper:
 
         # Construct the map between the pupil and image planes
         uPupil, vPupil, uImage, vImage, detJac = self._constructMap(
-            stamp, zkCoeff,
+            stamp,
+            zkCoeff,
         )
 
-        # Mask the pupil. We do this in two steps so that it plays nicely
-        # with the interpolation scheme below
+        # Create the pupil and image masks
+        # Mask the pupil
+        pupilMask = self.instrument.createPupilMask(stamp.image.shape[0])
+        imageMask = self._createImageMask(uPupil, vPupil, uImage, vImage)
 
-        # First, we want an inner mask that we will use to set the intensity
-        # inside the obscuration to zero. We will still project these points
-        # onto the image plane so that the interpolator knows the interior 
-        # of the obscuration has zero flux
-        rPupil = np.sqrt(uPupil**2 + vPupil**2)
-        innerMask = rPupil > self.instrument.obscuration
-        
-        # Second, we want an outer mask to totally ignore the points outside
-        # a normalized pupil radius of 1. These points are supposed to have
-        # zero flux too, but sometimes get mapped into the same areas as the
-        # points with non-zero flux. The presence of these zero-flux points
-        # in the same region of the pupil plane causes the interpolator to
-        # decrease the flux in these areas, which it should not do
-        outerMask = rPupil < 1
-
-        # Interpolate onto the image plane
-        image = griddata(
-            (uImage[outerMask].ravel(), vImage[outerMask].ravel()),
-            (innerMask * stamp.image / detJac)[outerMask].ravel(),
-            (uPupil.ravel(), vPupil.ravel()),
-            method="linear",
-        ).reshape(uPupil.shape)
-
-        # Set NaNs to zero
-        image = np.nan_to_num(image)
+        # Use nearest neighbors to interpolate projected image points
+        # onto a regular grid
+        image = np.zeros_like(uPupil)
+        image[imageMask] = griddata(
+            (uImage[pupilMask].ravel(), vImage[pupilMask].ravel()),
+            (stamp.image / detJac)[pupilMask].ravel(),
+            (uPupil[imageMask], vPupil[imageMask]),
+            method="nearest",
+        )
 
         # Update the stamp with the new image
-        stamp.config(image=image)
+        stamp.image = image
 
         return stamp
 
@@ -409,6 +479,6 @@ class ImageMapper:
         pupil *= mask
 
         # Update the stamp with the new pupil image
-        stamp.config(image=pupil)
+        stamp.image = pupil
 
         return stamp

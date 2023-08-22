@@ -140,6 +140,11 @@ class Instrument:
     def focalLength(self) -> float:
         """The focal length in meters."""
         return self._focalLength
+    
+    @property
+    def focalRatio(self) -> float:
+        """The f-number."""
+        return self.focalLength / self.diameter
 
     @property
     def defocalOffset(self) -> float:
@@ -167,31 +172,16 @@ class Instrument:
         return self.focalLength**2 / self.defocalOffset
 
     @property
-    def pupilMag(self) -> float:
-        """The magnification of the pupil onto the image plane.
-        
-        Note this does not take into account any intrinsic aberrations
-        inherent in the optical system.
-        """
-        return self.defocalOffset / self.focalLength
-
+    def donutRadius(self) -> float:
+        """The expected donut radius in pixels."""
+        rMeters = self.defocalOffset / np.sqrt(4*self.focalRatio**2 - 1)
+        rPixels = rMeters / self.pixelSize
+        return rPixels
+    
     @property
     def donutDiameter(self) -> float:
-        """The expected donut diameter in pixels.
-        
-        Note this does not take into account any intrinsic aberrations
-        inherent in the optical system.
-        """
-        return self.pupilMag * self.diameter / self.pixelSize
-
-    @property
-    def donutRadius(self) -> float:
-        """The expected donut radius in pixels.
-        
-        Note this does not take into account any intrinsic aberrations
-        inherent in the optical system.
-        """
-        return self.donutDiameter / 2
+        """The expected donut diameter in pixels."""
+        return 2 * self.donutRadius
 
     def createPupilGrid(self, nPixels: int) -> Tuple[np.ndarray, np.ndarray]:
         """Create an (nPixel x nPixel) grid for the pupil.

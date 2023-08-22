@@ -29,14 +29,13 @@ class TIEAlgorithm(WfAlgorithm):
         points to a config file, which is used to configure the Instrument.
         If a dictionary, it is assumed to hold keywords for configuration.
         If an Instrument object, that object is just used.
-    opticalModel : str, optional
-        The optical model used for image compensation. If "paraxial", the
-        original algorithm from Rodier & Rodier (1993) is used, which is
-        suitable for images near the optical axis on telescope with large
-        focal ratios. If "onAxis", the modification for small focal ratios
-        (i.e. fast optics) introduced by Xin (2015) is used. If "offAxis",
-        an empirical compensation polynomial is used. This is suitable for
-        fast telescopes, far from the optical axis.
+    addIntrinsic : bool, optional
+        Whether to explicitly add the intrinsic Zernike coefficients solved
+        for by the TIE. If False, the coefficients returned by the TIE
+        represent the full OPD. If True, the coefficients returned by the
+        TIE represent the wavefront deviation (i.e. OPD - intrinsic). If
+        the donuts provided to the TIE are at different field positions,
+        it is best to set addIntrinsic=True.
     solver : str, optional
         Method used to solve the TIE. If "exp", the TIE is solved via
         directly expanding the wavefront in a Zernike series. If "fft",
@@ -68,7 +67,7 @@ class TIEAlgorithm(WfAlgorithm):
         self,
         configFile: Union[Path, str, None] = "policy/wfAlgorithms/tie.yaml",
         instConfig: Union[Path, str, dict, Instrument, None] = None,
-        opticalModel: Optional[str] = None,
+        addIntrinsic: Optional[bool] = None,
         solver: Optional[str] = None,
         jmax: Optional[int] = None,
         maxIter: Optional[int] = None,
@@ -79,7 +78,7 @@ class TIEAlgorithm(WfAlgorithm):
         super().__init__(
             configFile=configFile,
             instConfig=instConfig,
-            opticalModel=opticalModel,
+            addIntrinsic=addIntrinsic,
             solver=solver,
             jmax=jmax,
             maxIter=maxIter,
@@ -92,20 +91,20 @@ class TIEAlgorithm(WfAlgorithm):
         self._history = {}  # type: ignore
 
     @property
-    def opticalModel(self) -> str:
-        """Return the optical model.
+    def addIntrinsic(self) -> bool:
+        """Flag indicating whether intrinsic Zernikes are explicitly added.
 
         For details about this parameter, see the class docstring.
         """
-        return self.imageMapper.opticalModel
+        return self.imageMapper.addIntrinsic
 
-    @opticalModel.setter
-    def opticalModel(self, value: str) -> None:
-        """Set the opticalModel."""
+    @addIntrinsic.setter
+    def addIntrinsic(self, value: bool) -> None:
+        """Set the addIntrinsic flag."""
         self._imageMapper = ImageMapper(
             configFile=None,
-            opticalModel=value,
             instConfig=self.instrument,
+            addIntrinsic=value,
         )
 
     @property
@@ -131,7 +130,7 @@ class TIEAlgorithm(WfAlgorithm):
                 f"Please choose one of {str(allowed_solvers)[1:-1]}."
             )
         self._solver = value
-            
+
     @property
     def jmax(self) -> int:
         """Return the maximum Zernike Noll index.
@@ -250,6 +249,50 @@ class TIEAlgorithm(WfAlgorithm):
 
         return self._history
 
+    def _validateStamps(
+        self,
+        I1: DonutStamp,
+        I2: DonutStamp,  # type: ignore[override]
+    ) -> None:
+        """Validate the DonutStamps for TIE estimation.
+
+        Parameters
+        ----------
+        I1 : DonutStamp
+            A stamp object containing an intra- or extra-focal donut image.
+        I2 : DonutStamp
+            A second stamp, on the opposite side of focus from I1.
+        """
+        # Make sure both stamps have been provided
+        if I1 is None or I2 is None:
+            raise ValueError(
+                "TIEAlgorithm requires a pair of intrafocal and extrafocal "
+                "donuts to estimate Zernikes. Please provide both I1 and I2."
+            )
+
+        # Check that I1 and I2 are on opposite sides of focus
+        if I2.defocalType == I1.defocalType:
+            raise ValueError("I1 and I2 must be on opposite sides of focus.")
+
+        # Check that the images are square
+        if len(I1.image.shape) != 2 or not np.allclose(*I1.image.shape):  # type: ignore
+            raise ValueError("I1 must be a square image.")
+        if len(I2.image.shape) != 2 or not np.allclose(*I2.image.shape):  # type: ignore
+            raise ValueError("I1 must be a square image.")
+
+        # Warn that addIntrinsic==False is a bad idea when the donuts are at
+        # different field angles
+        if (
+            not np.allclose(I1.fieldAngle, I2.fieldAngle)
+            and not self.addIntrinsic
+        ):
+            warnings.warn(
+                "When estimating Zernikes from a pair of donuts at different "
+                "field angles, it is wise to set self.addIntrinsic=True, "
+                "since telescopes have different intrinsic aberrations at "
+                "different field angles."
+            )
+
     def _expSolve(self, I0: np.ndarray, dIdz: np.ndarray) -> np.ndarray:
         """Solve the TIE directly using a Zernike expansion.
 
@@ -318,12 +361,11 @@ class TIEAlgorithm(WfAlgorithm):
         Returns
         -------
         np.ndarray
-            Zernike coefficients (for Noll indices >= 4) estimated from 
+            Zernike coefficients (for Noll indices >= 4) estimated from
             the images, in meters.
         """
-        # If I2 provided, check that I1 and I2 are on opposite sides of focus
-        if I2.defocalType == I1.defocalType:
-            raise ValueError("I1 and I2 must be on opposite sides of focus.")
+        # Validate the DonutStamps
+        self._validateStamps(I1, I2)
 
         # Assign the intra and extrafocal images
         intra = I1 if I1.defocalType == DefocalType.Intra else I2

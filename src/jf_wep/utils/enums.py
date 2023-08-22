@@ -14,3 +14,4 @@ class FilterLabel(Enum):
     LSST_I = "i"
     LSST_Z = "z"
     LSST_Y = "y"
+    REF = "ref"

@@ -1,6 +1,6 @@
 """Class to hold donut images along with metadata."""
 from copy import deepcopy
-from typing import Union, Optional
+from typing import Union
 
 import numpy as np
 from typing_extensions import Self
@@ -51,77 +51,14 @@ class DonutStamp:
         image: np.ndarray,
         fieldAngle: Union[np.ndarray, tuple, list],
         defocalType: Union[DefocalType, str],
-        filterLabel: Union[FilterLabel, str],
+        filterLabel: Union[FilterLabel, str] = FilterLabel.REF,
         blendOffsets: Union[np.ndarray, tuple, list] = np.zeros((2, 0)),
     ) -> None:
-        self.config(
-            image=image,
-            fieldAngle=fieldAngle,
-            defocalType=defocalType,
-            filterLabel=filterLabel,
-            blendOffsets=blendOffsets,
-        )
-
-    def config(
-        self,
-        image: Optional[np.ndarray] = None,
-        fieldAngle: Union[np.ndarray, tuple, list, None] = None,
-        defocalType: Union[DefocalType, str, None] = None,
-        filterLabel: Union[FilterLabel, str, None] = None,
-        blendOffsets: Union[np.ndarray, tuple, list, None] = None,
-    ) -> None:
-        """Configure the stamp.
-
-        For details on the parameters, see the class docstring.
-        """
-        # Set the image
-        if image is not None:
-            if not isinstance(image, np.ndarray):
-                raise TypeError("image must be a numpy array.")
-            if len(image.shape) != 2 or image.shape[0] != image.shape[1]:
-                raise ValueError("The image array must be square.")
-            self._image = image
-
-        # Set the field angle
-        if fieldAngle is not None:
-            fieldAngle = np.array(fieldAngle, dtype=float).squeeze()
-            if fieldAngle.shape != (2,):
-                raise ValueError("Field angle must have shape (2,).")
-            self._fieldAngle = fieldAngle
-
-        # Set the defocal type
-        if defocalType is not None:
-            if isinstance(defocalType, str):
-                self._defocalType = DefocalType(defocalType)
-            elif isinstance(defocalType, DefocalType):
-                self._defocalType = defocalType
-            else:
-                raise TypeError(
-                    "defocalType must be a DefocalType Enum, or "
-                    "one of the strings 'intra' or 'extra'."
-                )
-
-        # Set the filter label
-        if filterLabel is not None:
-            if isinstance(filterLabel, str):
-                self._filterLabel = FilterLabel(filterLabel)
-            elif isinstance(filterLabel, FilterLabel):
-                self._filterLabel = filterLabel
-            else:
-                raise TypeError(
-                    "filterLabel must be a FilterLabel Enum, or "
-                    "one of the corresponding strings."
-                )
-
-        # Set the blend offsets
-        if blendOffsets is not None:
-            blendOffsets = np.array(blendOffsets, dtype=float)
-            if blendOffsets.shape[0] != 2 or len(blendOffsets.shape) != 2:
-                raise ValueError(
-                    "blendOffsets must have shape (2, N), "
-                    "where N is the number of blends you wish to mask."
-                )
-            self._blendOffsets = blendOffsets
+        self.image = image
+        self.fieldAngle = fieldAngle  # type: ignore
+        self.defocalType = defocalType  # type: ignore
+        self.filterLabel = filterLabel  # type: ignore
+        self.blendOffsets = blendOffsets  # type: ignore
 
     @property
     def image(self) -> np.ndarray:
@@ -130,6 +67,14 @@ class DonutStamp:
         For details about this parameter, see the class docstring.
         """
         return self._image
+    
+    @image.setter
+    def image(self, value) -> None:
+        if not isinstance(value, np.ndarray):
+            raise TypeError("image must be a numpy array.")
+        if len(value.shape) != 2 or value.shape[0] != value.shape[1]:
+            raise ValueError("The image array must be square.")
+        self._image = value
 
     @property
     def fieldAngle(self) -> np.ndarray:
@@ -138,6 +83,13 @@ class DonutStamp:
         For details about this parameter, see the class docstring.
         """
         return self._fieldAngle
+    
+    @fieldAngle.setter
+    def fieldAngle(self, value: Union[np.ndarray, tuple, list]) -> None:
+        value = np.array(value, dtype=float).squeeze()
+        if value.shape != (2,):
+            raise ValueError("Field angle must have shape (2,).")
+        self._fieldAngle = value
 
     @property
     def defocalType(self) -> DefocalType:
@@ -147,6 +99,18 @@ class DonutStamp:
         """
         return self._defocalType
 
+    @defocalType.setter
+    def defocalType(self, value: Union[DefocalType, str]) -> None:
+        if isinstance(value, str):
+            self._defocalType = DefocalType(value)
+        elif isinstance(value, DefocalType):
+            self._defocalType = value
+        else:
+            raise TypeError(
+                "defocalType must be a DefocalType Enum, or "
+                "one of the strings 'intra' or 'extra'."
+            )
+
     @property
     def filterLabel(self) -> FilterLabel:
         """Return the FilterLabel Enum of the image.
@@ -154,6 +118,18 @@ class DonutStamp:
         For details about this parameter, see the class docstring.
         """
         return self._filterLabel
+    
+    @filterLabel.setter
+    def filterLabel(self, value: Union[FilterLabel, str]) -> None:
+        if isinstance(value, str):
+            self._filterLabel = FilterLabel(value)
+        elif isinstance(value, FilterLabel):
+            self._filterLabel = value
+        else:
+            raise TypeError(
+                "filterLabel must be a FilterLabel Enum, or "
+                "one of the corresponding strings."
+            )
 
     @property
     def blendOffsets(self) -> Union[np.ndarray, None]:
@@ -162,6 +138,16 @@ class DonutStamp:
         For details about this parameter, see the class docstring.
         """
         return self._blendOffsets
+    
+    @blendOffsets.setter
+    def blendOffsets(self, value: Union[np.ndarray, tuple, list]) -> None:
+        value = np.array(value, dtype=float)
+        if value.shape[0] != 2 or len(value.shape) != 2:
+            raise ValueError(
+                "blendOffsets must have shape (2, N), "
+                "where N is the number of blends you wish to mask."
+            )
+        self._blendOffsets = value
 
     def copy(self) -> Self:
         """Return a copy of the DonutImage object.

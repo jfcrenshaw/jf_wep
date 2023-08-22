@@ -1,2 +1,2 @@
-opticalModel: paraxial
 instConfig: policy/instruments/LsstCam.yaml
+addIntrinsic: True
