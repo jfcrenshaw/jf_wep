@@ -3,7 +3,7 @@
 
 name: ComCam
 diameter: 8.36 # aperture diameter in meters
-obscuration: 0.61 # fractional obscuration
+obscuration: 0.612 # fractional obscuration
 focalLength: 10.3034 # effective focal length in meters
 
 # Bo Xin used the offset of 1.5225 mm to get the parameters used for 1.5 mm in ZEMAX
