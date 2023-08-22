@@ -34,8 +34,8 @@ class WfEstimator:
         Algorithm configuration. If a Path or string, it is assumed this
         points to a config file, which is used to configure the algorithm.
         If the path begins with "policy/", then it is assumed the path is
-        relative to the policy directory. If a dictionary, it is assumed 
-        to hold keywords for configuration. If a WfAlgorithm object, that 
+        relative to the policy directory. If a dictionary, it is assumed
+        to hold keywords for configuration. If a WfAlgorithm object, that
         object is just used. If None, the algorithm defaults are used.
     units : str, optional
         Units in which the wavefront is returned. Options are "nm", "um",

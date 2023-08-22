@@ -67,7 +67,7 @@ class DonutStamp:
         For details about this parameter, see the class docstring.
         """
         return self._image
-    
+
     @image.setter
     def image(self, value) -> None:
         if not isinstance(value, np.ndarray):
@@ -83,7 +83,7 @@ class DonutStamp:
         For details about this parameter, see the class docstring.
         """
         return self._fieldAngle
-    
+
     @fieldAngle.setter
     def fieldAngle(self, value: Union[np.ndarray, tuple, list]) -> None:
         value = np.array(value, dtype=float).squeeze()
@@ -118,7 +118,7 @@ class DonutStamp:
         For details about this parameter, see the class docstring.
         """
         return self._filterLabel
-    
+
     @filterLabel.setter
     def filterLabel(self, value: Union[FilterLabel, str]) -> None:
         if isinstance(value, str):
@@ -138,7 +138,7 @@ class DonutStamp:
         For details about this parameter, see the class docstring.
         """
         return self._blendOffsets
-    
+
     @blendOffsets.setter
     def blendOffsets(self, value: Union[np.ndarray, tuple, list]) -> None:
         value = np.array(value, dtype=float)

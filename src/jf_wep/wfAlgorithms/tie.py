@@ -8,7 +8,11 @@ import numpy as np
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.imageMapper import ImageMapper
 from jf_wep.instrument import Instrument
-from jf_wep.utils import DefocalType, createZernikeBasis, createZernikeGradBasis
+from jf_wep.utils import (
+    DefocalType,
+    createZernikeBasis,
+    createZernikeGradBasis,
+)
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
 
 
@@ -50,6 +54,9 @@ class TIEAlgorithm(WfAlgorithm):
         been reached, all Zernike coefficients are used during compensation.
     compGain : float, optional
         The gain used to update the Zernikes for image compensation.
+    convergeTol : float, optional
+        The mean absolute deviation, in meters, between the Zernike estimates
+        of subsequent TIE iterations below which convergence is declared.
     saveHistory : bool, optional
         Whether to save the algorithm history in the self.history attribute.
         If True, then self.history contains information about the most recent
@@ -198,6 +205,21 @@ class TIEAlgorithm(WfAlgorithm):
         if value <= 0:
             raise ValueError("compGain must be positive.")
         self._compGain = value
+
+    @property
+    def convergeTol(self) -> float:
+        """The mean absolute deviation, in meters, between the Zernike estimates
+        of subsequent TIE iterations below which convergence is declared.
+        """
+        return self._convergeTol
+
+    @convergeTol.setter
+    def convergeTol(self, value: float) -> None:
+        """Set the convergence tolerance."""
+        value = float(value)
+        if value <= 0:
+            raise ValueError("convergeTol must be positive.")
+        self._convergeTol = value
 
     @property
     def saveHistory(self) -> bool:
@@ -431,9 +453,15 @@ class TIEAlgorithm(WfAlgorithm):
                     zkResid = self._fftSolve(I0, dIdz)
 
                 # Check for convergence
+                # (1) The mean absolute difference with the previous iteration
+                # must be below self.convergeTol
+                # (2) We must be compensating all the Zernikes
                 newBest = zkComp + zkResid
                 diffZk = zkBest - newBest
-                if np.sum(np.abs(diffZk)) < 0:
+                if (
+                    np.mean(np.abs(diffZk)) < self.convergeTol
+                    and jmaxComp == self.jmax
+                ):
                     converged = True
 
                 # Set the new best estimate

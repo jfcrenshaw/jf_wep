@@ -150,10 +150,10 @@ class Instrument:
     @property
     def donutRadius(self) -> float:
         """The expected donut radius in pixels."""
-        rMeters = self.defocalOffset / np.sqrt(4*self.focalRatio**2 - 1)
+        rMeters = self.defocalOffset / np.sqrt(4 * self.focalRatio**2 - 1)
         rPixels = rMeters / self.pixelSize
         return rPixels
-    
+
     @property
     def donutDiameter(self) -> float:
         """The expected donut diameter in pixels."""
@@ -192,7 +192,7 @@ class Instrument:
         uGrid, vGrid = np.meshgrid(grid, grid)
 
         return uGrid, vGrid
-    
+
     def createPupilMask(self, nPixels: int) -> np.ndarray:
         """Create an (nPixel x nPixel) mask for the pupil.
 
@@ -221,10 +221,10 @@ class Instrument:
         mask = (rPupil >= self.obscuration) & (rPupil <= 1)
 
         return mask
-    
+
     def createMarkedPupilMask(self, nPixels: int) -> np.ndarray:
         """Create a pupil mask with the positive u and v axes marked.
-        
+
         The positive u axis is marked with a circle, and the positive v axis
         is marked with a diamond. These marks are cutouts in the mask. This
         is helpful for tracking axis directions in different algorithms.
@@ -250,9 +250,9 @@ class Instrument:
         mRadius = (1 - self.obscuration) / 4
 
         # Add circle marker to positive u axis
-        mask = mask & (np.sqrt((uPupil - mCenter) ** 2 + vPupil**2) > mRadius)
+        mask &= np.sqrt((uPupil - mCenter) ** 2 + vPupil**2) > mRadius
 
         # Add diamond marker to positive v axis
-        mask = mask & (np.abs(uPupil) + np.abs(vPupil - mCenter) > mRadius)
+        mask &= (np.abs(uPupil) + np.abs(vPupil - mCenter) > mRadius)
 
         return mask

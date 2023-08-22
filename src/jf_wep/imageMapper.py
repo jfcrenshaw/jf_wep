@@ -53,9 +53,11 @@ class ImageMapper:
         # Set the addIntrinsic flag
         self.addIntrinsic = params["addIntrinsic"]
 
-    def configInstrument(self, instConfig: Union[Instrument, Path, str, dict]) -> None:
+    def configInstrument(
+        self, instConfig: Union[Instrument, Path, str, dict]
+    ) -> None:
         """Configure the instrument.
-        
+
         For details about this parameter, see the class docstring.
         """
         self._instrument = loadConfig(instConfig, Instrument)
@@ -75,7 +77,7 @@ class ImageMapper:
         For details about this parameter, see the class docstring.
         """
         return self._addIntrinsic
-    
+
     @addIntrinsic.setter
     def addIntrinsic(self, value: bool) -> None:
         if not isinstance(value, bool):
@@ -252,7 +254,7 @@ class ImageMapper:
         )
 
         # Map the pupil grid onto the image plane
-        with np.errstate(invalid='ignore'):
+        with np.errstate(invalid="ignore"):
             prefactor = np.sqrt((4 * N**2 - 1) / (4 * N**2 - rPupil**2))
         uImage = prefactor * (-defocalSign * uPupil - 4 * N**2 / l * d1Wdu)
         vImage = prefactor * (-defocalSign * vPupil - 4 * N**2 / l * d1Wdv)

@@ -52,9 +52,11 @@ class WfAlgorithm(ABC):
         for key, value in params.items():
             setattr(self, key, value)
 
-    def configInstrument(self, instConfig: Union[Instrument, Path, str, dict]) -> None:
+    def configInstrument(
+        self, instConfig: Union[Instrument, Path, str, dict]
+    ) -> None:
         """Configure the instrument.
-        
+
         For details about this parameter, see the class docstring.
         """
         self._instrument = loadConfig(instConfig, Instrument)
@@ -86,7 +88,7 @@ class WfAlgorithm(ABC):
         Returns
         -------
         np.ndarray
-            Zernike coefficients (for Noll indices >= 4) estimated from 
+            Zernike coefficients (for Noll indices >= 4) estimated from
             the image (or pair of images), in meters.
         """
         ...

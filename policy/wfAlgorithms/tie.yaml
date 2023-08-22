@@ -4,7 +4,8 @@ instConfig: policy/instruments/LsstCam.yaml
 jmax: 28
 solver: exp
 addIntrinsic: True
-maxIter: 14
-compSequence: [4, 4, 6, 6, 13, 13, 13, 13, 22, 22, 22, 22, 28, 28]
+maxIter: 20
+compSequence: [4, 4, 6, 6, 13, 13, 13, 13, 22, 22, 22, 22, 22, 22]
 compGain: 0.6
+convergeTol: 1.0e-9
 saveHistory: False
