@@ -40,31 +40,7 @@ class Instrument:
         defocalOffset: Optional[float] = None,
         pixelSize: Optional[float] = None,
     ) -> None:
-        self.config(
-            configFile=configFile,
-            name=name,
-            diameter=diameter,
-            obscuration=obscuration,
-            focalLength=focalLength,
-            defocalOffset=defocalOffset,
-            pixelSize=pixelSize,
-        )
-
-    def config(
-        self,
-        configFile: Union[Path, str, None] = None,
-        name: Optional[str] = None,
-        diameter: Optional[float] = None,
-        obscuration: Optional[float] = None,
-        focalLength: Optional[float] = None,
-        defocalOffset: Optional[float] = None,
-        pixelSize: Optional[float] = None,
-    ) -> None:
-        """Configure the instrument.
-
-        For details on the parameters, see the class docstring.
-        """
-        # Merge the keyword arguments with the default parameters
+        # Merge keyword arguments with defaults from configFile
         params = mergeParams(
             configFile,
             name=name,
@@ -75,86 +51,31 @@ class Instrument:
             pixelSize=pixelSize,
         )
 
-        # Set the name
-        name = params["name"]
-        if name is not None:
-            name = str(name)
-            self._name = name
-
-        # Set the diameter
-        diameter = params["diameter"]
-        if diameter is not None:
-            diameter = float(diameter)
-            if diameter <= 0:
-                raise ValueError("diameter must be positive.")
-            self._diameter = diameter
-
-        # Set the fractional obscuration
-        obscuration = params["obscuration"]
-        if obscuration is not None:
-            obscuration = float(obscuration)
-            if obscuration < 0 or obscuration > 1:
-                raise ValueError(
-                    "The obscuration must be between 0 and 1 (inclusive)."
-                )
-            self._obscuration = obscuration
-
-        # Set the focal length
-        focalLength = params["focalLength"]
-        if focalLength is not None:
-            focalLength = float(focalLength)
-            if focalLength <= 0:
-                raise ValueError("focalLength must be positive.")
-            self._focalLength = focalLength
-
-        # Set the defocal offset
-        defocalOffset = params["defocalOffset"]
-        if defocalOffset is not None:
-            defocalOffset = np.abs(float(defocalOffset))
-            self._defocalOffset = defocalOffset
-
-        # Set the pixel size
-        pixelSize = params["pixelSize"]
-        if pixelSize is not None:
-            pixelSize = float(pixelSize)
-            if pixelSize <= 0:
-                raise ValueError("pixelSize must be positive.")
-            self._pixelSize = pixelSize
+        # Set each parameter
+        for key, value in params.items():
+            setattr(self, key, value)
 
     @property
     def name(self) -> str:
         """The name of the instrument."""
         return self._name
 
+    @name.setter
+    def name(self, value: str) -> None:
+        self._name = str(value)
+
     @property
     def diameter(self) -> float:
         """The primary mirror diameter in meters."""
         return self._diameter
 
-    @property
-    def obscuration(self) -> float:
-        """The fractional obscuration."""
-        return self._obscuration
-
-    @property
-    def focalLength(self) -> float:
-        """The focal length in meters."""
-        return self._focalLength
-    
-    @property
-    def focalRatio(self) -> float:
-        """The f-number."""
-        return self.focalLength / self.diameter
-
-    @property
-    def defocalOffset(self) -> float:
-        """The defocal offset in meters."""
-        return self._defocalOffset  # type: ignore
-
-    @property
-    def pixelSize(self) -> float:
-        """The pixel size in meters."""
-        return self._pixelSize
+    @diameter.setter
+    def diameter(self, value: float) -> None:
+        """Set the diameter."""
+        value = float(value)
+        if value <= 0:
+            raise ValueError("diameter must be positive.")
+        self._diameter = value
 
     @property
     def radius(self) -> float:
@@ -167,9 +88,64 @@ class Instrument:
         return np.pi * self.radius**2 * (1 - self.obscuration**2)
 
     @property
+    def obscuration(self) -> float:
+        """The fractional obscuration."""
+        return self._obscuration
+
+    @obscuration.setter
+    def obscuration(self, value: float) -> None:
+        value = float(value)
+        if value < 0 or value > 1:
+            raise ValueError(
+                "The obscuration must be between 0 and 1 (inclusive)."
+            )
+        self._obscuration = value
+
+    @property
+    def focalLength(self) -> float:
+        """The focal length in meters."""
+        return self._focalLength
+
+    @focalLength.setter
+    def focalLength(self, value: float) -> None:
+        """Set the focal length."""
+        value = float(value)
+        if value <= 0:
+            raise ValueError("focalLength must be positive.")
+        self._focalLength = value
+
+    @property
+    def focalRatio(self) -> float:
+        """The f-number."""
+        return self.focalLength / self.diameter
+
+    @property
+    def defocalOffset(self) -> float:
+        """The defocal offset in meters."""
+        return self._defocalOffset  # type: ignore
+
+    @defocalOffset.setter
+    def defocalOffset(self, value: float) -> None:
+        value = np.abs(float(value))
+        self._defocalOffset = value
+
+    @property
     def pupilOffset(self) -> float:
         """The pupil offset in meters."""
         return self.focalLength**2 / self.defocalOffset
+
+    @property
+    def pixelSize(self) -> float:
+        """The pixel size in meters."""
+        return self._pixelSize
+
+    @pixelSize.setter
+    def pixelSize(self, value: float) -> None:
+        """Set the pixel size."""
+        value = float(value)
+        if value <= 0:
+            raise ValueError("pixelSize must be positive.")
+        self._pixelSize = value
 
     @property
     def donutRadius(self) -> float:

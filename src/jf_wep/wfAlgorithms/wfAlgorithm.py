@@ -35,7 +35,7 @@ class WfAlgorithm(ABC):
     def __init__(
         self,
         configFile: Union[Path, str, None] = None,
-        instConfig: Union[Instrument, Path, str, dict, None] = None,
+        instConfig: Union[Path, str, dict, Instrument, None] = None,
         **kwargs: Any,
     ) -> None:
         # Merge keyword arguments with defaults from configFile
