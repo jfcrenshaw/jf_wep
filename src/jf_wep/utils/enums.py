@@ -15,3 +15,7 @@ class FilterLabel(Enum):
     LSST_Z = "z"
     LSST_Y = "y"
     REF = "ref"
+
+
+class WfAlgorithmName(Enum):
+    TIE = "tie"

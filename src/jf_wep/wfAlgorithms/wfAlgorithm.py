@@ -10,7 +10,7 @@ import numpy as np
 
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils import loadConfig, mergeParams
+from jf_wep.utils import mergeParams
 
 
 class WfAlgorithm(ABC):
@@ -22,11 +22,6 @@ class WfAlgorithm(ABC):
         Path to file specifying values for the other parameters. If the
         path starts with "policy/", it will look in the policy directory.
         Any explicitly passed parameters override values found in this file
-    instConfig : Path or str or dict or Instrument, optional
-        Instrument configuration. If a Path or string, it is assumed this
-        points to a config file, which is used to configure the Instrument.
-        If a dictionary, it is assumed to hold keywords for configuration.
-        If an Instrument object, that object is just used.
 
     ...
 
@@ -35,45 +30,79 @@ class WfAlgorithm(ABC):
     def __init__(
         self,
         configFile: Union[Path, str, None] = None,
-        instConfig: Union[Path, str, dict, Instrument, None] = None,
         **kwargs: Any,
     ) -> None:
         # Merge keyword arguments with defaults from configFile
         params = mergeParams(
             configFile,
-            instConfig=instConfig,
             **kwargs,
         )
 
-        # Configure the instrument
-        self.configInstrument(params.pop("instConfig"))
-
-        # Configure other parameters
+        # Configure parameters
         for key, value in params.items():
             setattr(self, key, value)
 
-    def configInstrument(
-        self, instConfig: Union[Instrument, Path, str, dict]
+    @staticmethod
+    def _validateInputs(
+        I1: DonutStamp,
+        I2: Optional[DonutStamp],
+        jmax: int = 28,
+        instrument: Instrument = Instrument(),
     ) -> None:
-        """Configure the instrument.
+        """Validate the inputs to estimateWf.
 
-        For details about this parameter, see the class docstring.
+        Parameters
+        ----------
+        I1 : DonutStamp
+            A stamp object containing an intra- or extra-focal donut image.
+        I2 : DonutStamp, optional
+            A second stamp, on the opposite side of focus from I1.
+            (the default is None)
+        jmax : int, optional
+            The maximum Zernike Noll index to estimate.
+            (the default is 28)
+        instrument : Instrument, optional
+            The Instrument object associated with the DonutStamps.
+            (the default is the default Instrument)
         """
-        self._instrument = loadConfig(instConfig, Instrument)
+        # Validate I1
+        if not isinstance(I1, DonutStamp):
+            raise TypeError("I1 must be a DonutStamp")
+        if len(I1.image.shape) != 2 or not np.allclose(
+            *I1.image.shape  # type: ignore
+        ):
+            raise ValueError("I1.image must be square.")
 
-    @property
-    def instrument(self) -> Instrument:
-        """Return the instrument object.
+        # Validate I2 if provided
+        if I2 is not None:
+            if not isinstance(I2, DonutStamp):
+                raise TypeError("I2 must be a DonutStamp")
+            if len(I2.image.shape) != 2 or not np.allclose(
+                *I2.image.shape  # type: ignore
+            ):
+                raise ValueError("I2.image must be square.")
+            if I2.defocalType == I1.defocalType:
+                raise ValueError(
+                    "I1 and I2 must be on opposite sides of focus."
+                )
 
-        For details about this parameter, see the class docstring.
-        """
-        return self._instrument
+        # Validate jmax
+        if not isinstance(jmax, int):
+            raise TypeError("jmax must be an integer.")
+        if jmax < 4:
+            raise ValueError("jmax must be greater than or equal to 4.")
+
+        # Validate the instrument
+        if not isinstance(instrument, Instrument):
+            raise TypeError("instrument must be an Instrument.")
 
     @abstractmethod
     def estimateWf(
         self,
         I1: DonutStamp,
         I2: Optional[DonutStamp],
+        jmax: int = 28,
+        instrument: Instrument = Instrument(),
     ) -> np.ndarray:
         """Return the wavefront Zernike coefficients in meters.
 
@@ -84,6 +113,12 @@ class WfAlgorithm(ABC):
         I2 : DonutStamp, optional
             A second stamp, on the opposite side of focus from I1.
             (the default is None)
+        jmax : int, optional
+            The maximum Zernike Noll index to estimate.
+            (the default is 28)
+        instrument : Instrument, optional
+            The Instrument object associated with the DonutStamps.
+            (the default is the default Instrument)
 
         Returns
         -------

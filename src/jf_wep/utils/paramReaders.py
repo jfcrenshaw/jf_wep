@@ -128,14 +128,14 @@ def mergeParams(paramFile: Union[Path, str, None], **kwargs: Any) -> dict:
     keys = (params | kwargs).keys()
 
     # Merge the dictionaries
-    merged_params = {}
+    mergedParams = {}
     for key in keys:
         if kwargs.get(key, None) is not None:
-            merged_params[key] = kwargs[key]
+            mergedParams[key] = kwargs[key]
         else:
-            merged_params[key] = params.get(key, None)
+            mergedParams[key] = params.get(key, None)
 
-    return merged_params
+    return mergedParams
 
 
 def loadConfig(config: Union[Any, Path, str, dict], item: Any) -> Any:
@@ -161,7 +161,7 @@ def loadConfig(config: Union[Any, Path, str, dict], item: Any) -> Any:
         If item is a class, and config is an instance of that class,
         then config is just returned unaltered.
     item : Any
-        Can be a class or a class instance with a config method.
+        A class representing the object to be configured.
 
     Returns
     -------
@@ -170,41 +170,31 @@ def loadConfig(config: Union[Any, Path, str, dict], item: Any) -> Any:
 
     Raises
     ------
-    ValueError
-        If item is not a class or a class instance with a config method
     TypeError
-        If item is the wrong type
+        If item is not a class
     """
-    # Check if item is a class
-    if inspect.isclass(item):
-        # If the config is an instance of this class, just return it
-        if isinstance(config, item):
-            return config
+    # Check that item is a class
+    if not inspect.isclass(item):
+        raise TypeError("item must be a class.")
 
-        # Otherwise, we will call the class constructor to configure the item
-        config_func = item
-
-    # If item is not a class, check that it has a config method
-    elif hasattr(item, "config"):
-        # We will use the config method to configure the item
-        config_func = item.config
-
-    # If it's not a class and does not have a config method,
-    # raise an error
-    else:
-        raise ValueError(
-            "item must be a class, or a class instance with a config method."
-        )
+    # If the config is an instance of this class, just return it
+    if isinstance(config, item):
+        return config
 
     # If config is a Path or string, pass config as configFile
     if isinstance(config, Path) or isinstance(config, str):
-        return config_func(configFile=config)
+        return item(configFile=config)
     # If it's a dictionary, pass keyword arguments
     elif isinstance(config, dict):
-        return config_func(**config)
+        return item(**config)
+    # If it's a None, try instantiating the class with its defaults
+    elif config is None:
+        return item()
     # If it's none of these types, raise an error
     else:
         raise TypeError(
-            "config must be a Path, string, or dictionary, "
-            "or, if item is a class, it can be an instance of that class."
+            "config must be a Path, string, dictionary or "
+            "an instance of the class specified by item. "
+            "It can also be None, in which case the default "
+            "config for item is used."
         )

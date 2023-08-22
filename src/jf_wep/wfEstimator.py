@@ -3,7 +3,6 @@
 This class wraps all the boilerplate for choosing different wavefront
 estimation algorithms, supplying images in the correct format, etc.
 """
-import warnings
 from pathlib import Path
 from typing import Optional, Union
 
@@ -11,9 +10,9 @@ import numpy as np
 
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils import loadConfig, mergeParams
-from jf_wep.wfAlgorithms.tie import TIEAlgorithm
+from jf_wep.utils import loadConfig, mergeParams, convertZernikesToPsfWidth
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
+from jf_wep.wfAlgorithms.wfAlgorithmFactory import WfAlgorithmFactory
 
 
 class WfEstimator:
@@ -37,110 +36,70 @@ class WfEstimator:
         relative to the policy directory. If a dictionary, it is assumed
         to hold keywords for configuration. If a WfAlgorithm object, that
         object is just used. If None, the algorithm defaults are used.
+    instConfig : Path or str or dict or Instrument, optional
+        Instrument configuration. If a Path or string, it is assumed this
+        points to a config file, which is used to configure the Instrument.
+        If a dictionary, it is assumed to hold keywords for configuration.
+        If an Instrument object, that object is just used.
+    jmax : int, optional
+        The maximum Zernike Noll index to estimate.
     units : str, optional
         Units in which the wavefront is returned. Options are "nm", "um",
         or "arcsecs".
-    shapeMode : str, optional
-        How to handle the image shape. If "strict", an error will be
-        raised when trying to estimate the wavefront for an image of
-        the wrong size. NEED TO WRITE MORE OF THIS LATER.
-
-    Raises
-    ------
-    ValueError
-        Invalid algo name, unit name, or shapeMode
-    TypeError
-        If algo_params is not a dictionary or None
     """
 
     def __init__(
         self,
         configFile: Union[Path, str, None] = "policy/wfEstimator.yaml",
-        algo: Optional[str] = None,
+        algoName: Optional[str] = None,
         algoConfig: Union[Path, str, dict, WfAlgorithm, None] = None,
-        units: Optional[str] = None,
-        shapeMode: Optional[str] = None,
-    ) -> None:
-        self.config(
-            configFile=configFile,
-            algo=algo,
-            algoConfig=algoConfig,
-            units=units,
-            shapeMode=shapeMode,
-        )
-
-    def config(
-        self,
-        configFile: Union[Path, str, None] = None,
-        algo: Optional[str] = None,
-        algoConfig: Union[WfAlgorithm, Path, str, dict, None] = None,
-        instConfig: Union[Instrument, Path, str, dict, None] = None,
+        instConfig: Union[Path, str, dict, Instrument, None] = None,
         jmax: Optional[int] = None,
         units: Optional[str] = None,
-        shapeMode: Optional[str] = None,
     ) -> None:
-        """Configure the wavefront estimator.
-
-        For details on the parameters, see the class docstring.
-        """
-        # Merge the keyword arguments with the default parameters
+        # Merge keyword arguments with defaults from configFile
         params = mergeParams(
             configFile,
-            algo=algo,
+            algoName=algoName,
             algoConfig=algoConfig,
-            instConfig=instConfig,
             jmax=jmax,
             units=units,
-            shapeMode=shapeMode,
         )
 
-        # Instantiate the algorithm
-        algo = params["algo"]
-        if algo is not None:
-            allowed_algos = ["tie"]
-            if algo not in allowed_algos:
-                raise ValueError(
-                    f"Algorithm '{algo}' not supported. "
-                    f"Please choose one of {str(allowed_algos)[1:-1]}."
-                )
-            if algo == "tie":
-                self._algo = TIEAlgorithm()
+        # Set the algorithm
+        self._algo = WfAlgorithmFactory.createWfAlgorithm(
+            params["algoName"], params["algoConfig"]
+        )
 
-        # Configure the algorithm
-        algoConfig = params["algoConfig"]
-        if algoConfig is not None:
-            self._algo = loadConfig(algoConfig, self.algo)
+        # Set the instrument
+        self._instrument = loadConfig(instConfig, Instrument)
 
-        # Set the units
-        units = params["units"]
-        if units is not None:
-            allowed_units = ["nm", "um", "arcsecs"]
-            if units not in allowed_units:
-                raise ValueError(
-                    f"Unit '{units}' not supported. "
-                    f"Please choose one of {str(allowed_units)[1:-1]}."
-                )
-            self._units = units
-
-        # Set the shape mode
-        shapeMode = params["shapeMode"]
-        if shapeMode is not None:
-            warnings.warn("\nSHAPE MODE NOT IMPLEMENTED + DOCSTRING\n")
-            allowed_shapeModes = ["strict"]
-            if shapeMode not in allowed_shapeModes:
-                raise ValueError(
-                    f"shapeMode '{shapeMode}' not supported. "
-                    f"Please choose one of {str(allowed_shapeModes)[1:-1]}."
-                )
-            self._shapeMode = shapeMode
+        # Set the other parameters
+        self.jmax = params["jmax"]
+        self.units = params["units"]
 
     @property
     def algo(self) -> WfAlgorithm:
-        """Return the wavefront estimation algorithm.
-
-        For details about this parameter, see the class docstring.
-        """
+        """Return the WfAlgorithm object."""
         return self._algo
+
+    @property
+    def instrument(self) -> Instrument:
+        """Return the Instrument object."""
+        return self._instrument
+
+    @property
+    def jmax(self) -> int:
+        """Return the maximum Zernike Noll index that will be estimated."""
+        return self._jmax
+
+    @jmax.setter
+    def jmax(self, value: int) -> None:
+        """Set jmax"""
+        value = int(value)
+        if value < 4:
+            raise ValueError("jmax must be greater than or equal to 4.")
+        self._jmax = value
 
     @property
     def units(self) -> str:
@@ -150,25 +109,23 @@ class WfEstimator:
         """
         return self._units
 
-    @property
-    def shapeMode(self) -> str:
-        """Return the shape mode.
-
-        For details about this parameter, see the class docstring.
-        """
-        return self._shapeMode
+    @units.setter
+    def units(self, value: str) -> None:
+        """Set the units of the Zernike coefficients."""
+        allowed_units = ["m", "um", "nm", "arcsecs"]
+        if value not in allowed_units:
+            raise ValueError(
+                f"Unit '{value}' not supported. "
+                f"Please choose one of {str(allowed_units)[1:-1]}."
+            )
+        self._units = value
 
     def estimateWf(
         self,
         I1: DonutStamp,
-        I2: Union[DonutStamp, None] = None,
+        I2: Optional[DonutStamp] = None,
     ) -> np.ndarray:
-        """Estimate the wavefront for the image or pair of images.
-
-        The wavefront is returned as an array of Zernike coefficients.
-        The number of Zernike coefficients and the units of the
-        coefficients are determined by the jmax and units parameters in
-        the self.config() method.
+        """Estimate the wavefront from the stamp or pair of stamps.
 
         Parameters
         ----------
@@ -181,21 +138,34 @@ class WfEstimator:
         Returns
         -------
         np.ndarray
-            Numpy array of the Zernike coefficients estimated from the image
-            or pair of images.
+            Numpy array of the Zernike coefficients estimated from the stamp
+            or pair of stamp. The array contains Noll coefficients from
+            4 - self.jmax, inclusive. The unit is determined by self.units.
 
         Raises
         ------
         ValueError
             If I1 and I2 are on the same side of focus.
         """
-        # Get the estimated wavefront in terms of Zernike coefficients in nm
-        zk = self.algo.estimateWf(I1, I2)  # type: ignore
+        # Estimated wavefront (in meters)
+        zk = self.algo.estimateWf(I1, I2, self.jmax, self.instrument)
 
         # Convert to desired units
-        if self.units in ["um", "arcsecs"]:
-            zk = 1e-3 * zk
-        if self.units == "arcsecs":
-            raise NotImplementedError
+        if self.units == "m":
+            return zk
+        elif self.units == "um":
+            return 1e6 * zk
+        elif self.units == "nm":
+            return 1e9 * zk
+        elif self.units == "arcsecs":
+            return convertZernikesToPsfWidth(
+                zk,
+                self.instrument.diameter,
+                self.instrument.obscuration,
+            )
+        else:
+            raise RuntimeError(
+                f"Conversion to unit '{self.units}' not supported."
+            )
 
         return zk

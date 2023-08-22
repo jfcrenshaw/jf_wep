@@ -1,7 +1,5 @@
 # Default parameters for the TIE algorithm
 
-instConfig: policy/instruments/LsstCam.yaml
-jmax: 28
 solver: exp
 addIntrinsic: True
 maxIter: 20

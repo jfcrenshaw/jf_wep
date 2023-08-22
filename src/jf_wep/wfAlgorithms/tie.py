@@ -26,11 +26,6 @@ class TIEAlgorithm(WfAlgorithm):
         path starts with "policy/", it will look in the policy directory.
         Any explicitly passed parameters override values found in this file
         (the default is policy/wfAlgorithms/tie.yaml)
-    instConfig : Path or str or dict or Instrument, optional
-        Instrument configuration. If a Path or string, it is assumed this
-        points to a config file, which is used to configure the Instrument.
-        If a dictionary, it is assumed to hold keywords for configuration.
-        If an Instrument object, that object is just used.
     addIntrinsic : bool, optional
         Whether to explicitly add the intrinsic Zernike coefficients solved
         for by the TIE. If False, the coefficients returned by the TIE
@@ -42,8 +37,6 @@ class TIEAlgorithm(WfAlgorithm):
         Method used to solve the TIE. If "exp", the TIE is solved via
         directly expanding the wavefront in a Zernike series. If "fft",
         the TIE is solved using fast Fourier transforms.
-    jmax : int, optional
-        Maximum Zernike Noll index for which to solve.
     maxIter : int, optional
         The maximum number of iterations of the TIE loop.
     compSequence : iterable, optional
@@ -71,10 +64,8 @@ class TIEAlgorithm(WfAlgorithm):
     def __init__(
         self,
         configFile: Union[Path, str, None] = "policy/wfAlgorithms/tie.yaml",
-        instConfig: Union[Path, str, dict, Instrument, None] = None,
         addIntrinsic: Optional[bool] = None,
         solver: Optional[str] = None,
-        jmax: Optional[int] = None,
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
         compGain: Optional[float] = None,
@@ -82,10 +73,8 @@ class TIEAlgorithm(WfAlgorithm):
     ) -> None:
         super().__init__(
             configFile=configFile,
-            instConfig=instConfig,
             addIntrinsic=addIntrinsic,
             solver=solver,
-            jmax=jmax,
             maxIter=maxIter,
             compSequence=compSequence,
             compGain=compGain,
@@ -101,21 +90,14 @@ class TIEAlgorithm(WfAlgorithm):
 
         For details about this parameter, see the class docstring.
         """
-        return self.imageMapper.addIntrinsic
+        return self._addIntrinsic
 
     @addIntrinsic.setter
     def addIntrinsic(self, value: bool) -> None:
         """Set the addIntrinsic flag."""
-        self._imageMapper = ImageMapper(
-            configFile=None,
-            instConfig=self.instrument,
-            addIntrinsic=value,
-        )
-
-    @property
-    def imageMapper(self) -> ImageMapper:
-        """Return the ImageMapper."""
-        return self._imageMapper
+        if not isinstance(value, bool):
+            raise TypeError("addIntrinsic must be a bool.")
+        self._addIntrinsic = value
 
     @property
     def solver(self) -> Union[str, None]:
@@ -135,25 +117,6 @@ class TIEAlgorithm(WfAlgorithm):
                 f"Please choose one of {str(allowed_solvers)[1:-1]}."
             )
         self._solver = value
-
-    @property
-    def jmax(self) -> int:
-        """Return the maximum Zernike Noll index.
-
-        For details about this parameter, see the class docstring.
-        """
-        return self._jmax
-
-    @jmax.setter
-    def jmax(self, value: int) -> None:
-        """Set jmax."""
-        if not isinstance(value, int) and not (
-            isinstance(value, float) and int(value) == value
-        ):
-            raise TypeError("jmax must be an integer")
-        if value < 4:
-            raise ValueError("jmax must be >= 4.")
-        self._jmax = int(value)
 
     @property
     def maxIter(self) -> int:
@@ -283,12 +246,6 @@ class TIEAlgorithm(WfAlgorithm):
         I2 : DonutStamp
             A second stamp, on the opposite side of focus from I1.
         """
-        # Make sure both stamps have been provided
-        if I1 is None or I2 is None:
-            raise ValueError(
-                "TIEAlgorithm requires a pair of intrafocal and extrafocal "
-                "donuts to estimate Zernikes. Please provide both I1 and I2."
-            )
 
         # Check that I1 and I2 are on opposite sides of focus
         if I2.defocalType == I1.defocalType:
@@ -299,6 +256,113 @@ class TIEAlgorithm(WfAlgorithm):
             raise ValueError("I1 must be a square image.")
         if len(I2.image.shape) != 2 or not np.allclose(*I2.image.shape):  # type: ignore
             raise ValueError("I1 must be a square image.")
+
+    def _expSolve(
+        self,
+        I0: np.ndarray,
+        dIdz: np.ndarray,
+        jmax: int,
+        instrument: Instrument,
+    ) -> np.ndarray:
+        """Solve the TIE directly using a Zernike expansion.
+
+        Parameters
+        ----------
+        I0 : np.ndarray
+            The beam intensity at the exit pupil
+        dIdz : np.ndarray
+            The z-derivative of the beam intensity across the exit pupil
+        jmax : int
+            The maximum Zernike Noll index to estimate
+        instrument : Instrument, optional
+            The Instrument object associated with the DonutStamps.
+            (the default is the default Instrument)
+
+        Returns
+        -------
+        np.ndarray
+            Numpy array of the Zernike coefficients estimated from the image
+            or pair of images, in nm.
+        """
+        # Get Zernike Bases
+        zk = createZernikeBasis(jmax, instrument, I0.shape[0])
+        dzkdu, dzkdv = createZernikeGradBasis(jmax, instrument, I0.shape[0])
+
+        # Calculate quantities for the linear equation
+        b = -np.einsum("ab,jab->j", dIdz, zk, optimize=True)
+        M = np.einsum("ab,jab,kab->jk", I0, dzkdu, dzkdu, optimize=True)
+        M += np.einsum("ab,jab,kab->jk", I0, dzkdv, dzkdv, optimize=True)
+        M /= instrument.radius**2
+
+        # Invert to get Zernike coefficients in meters
+        zkCoeff, *_ = np.linalg.lstsq(M, b, rcond=None)
+
+        return zkCoeff
+
+    def _fftSolve(
+        self,
+        I0: np.ndarray,
+        dIdz: np.ndarray,
+        jmax: int,
+        instrument: Instrument,
+    ) -> np.ndarray:
+        """Solve the TIE using fast Fourier transforms.
+
+        Parameters
+        ----------
+        I0 : np.ndarray
+            The beam intensity at the exit pupil
+        dIdz : np.ndarray
+            The z-derivative of the beam intensity across the exit pupil
+        jmax : int
+            The maximum Zernike Noll index to estimate
+        instrument : Instrument, optional
+            The Instrument object associated with the DonutStamps.
+            (the default is the default Instrument)
+
+        Returns
+        -------
+        np.ndarray
+            Numpy array of the Zernike coefficients estimated from the image
+            or pair of images, in nm.
+        """
+        raise NotImplementedError
+
+    def estimateWf(
+        self,
+        I1: DonutStamp,
+        I2: DonutStamp,  # type: ignore[override]
+        jmax: int = 28,
+        instrument: Instrument = Instrument(),
+    ) -> np.ndarray:
+        """Return the wavefront Zernike coefficients in meters.
+
+        Parameters
+        ----------
+        I1 : DonutStamp
+            A stamp object containing an intra- or extra-focal donut image.
+        I2 : DonutStamp
+            A second stamp, on the opposite side of focus from I1.
+        jmax : int, optional
+            The maximum Zernike Noll index to estimate.
+            (the default is 28)
+        instrument : Instrument, optional
+            The Instrument object associated with the DonutStamps.
+            (the default is the default Instrument)
+
+        Returns
+        -------
+        np.ndarray
+            Zernike coefficients (for Noll indices >= 4) estimated from
+            the images, in meters.
+        """
+        # Validate the inputs
+        if I1 is None or I2 is None:
+            raise ValueError(
+                "TIEAlgorithm requires a pair of intrafocal and extrafocal "
+                "donuts to estimate Zernikes. Please provide both I1 and I2."
+            )
+        self._validateInputs(I1, I2, jmax, instrument)
 
         # Warn that addIntrinsic==False is a bad idea when the donuts are at
         # different field angles
@@ -313,86 +377,19 @@ class TIEAlgorithm(WfAlgorithm):
                 "different field angles."
             )
 
-    def _expSolve(self, I0: np.ndarray, dIdz: np.ndarray) -> np.ndarray:
-        """Solve the TIE directly using a Zernike expansion.
-
-        Parameters
-        ----------
-        I0
-            The beam intensity at the exit pupil
-        dIdz
-            The z-derivative of the beam intensity across the exit pupil
-
-        Returns
-        -------
-        np.ndarray
-            Numpy array of the Zernike coefficients estimated from the image
-            or pair of images, in nm.
-        """
-        # Get Zernike Bases
-        zk = createZernikeBasis(self.jmax, self.instrument, I0.shape[0])
-        dzkdu, dzkdv = createZernikeGradBasis(
-            self.jmax, self.instrument, I0.shape[0]
+        # Create the ImageMapper for image compensation
+        imageMapper = ImageMapper(
+            configFile=None,
+            instConfig=instrument,
+            addIntrinsic=self.addIntrinsic,
         )
-
-        # Calculate quantities for the linear equation
-        b = -np.einsum("ab,jab->j", dIdz, zk, optimize=True)
-        M = np.einsum("ab,jab,kab->jk", I0, dzkdu, dzkdu, optimize=True)
-        M += np.einsum("ab,jab,kab->jk", I0, dzkdv, dzkdv, optimize=True)
-        M /= self.instrument.radius**2
-
-        # Invert to get Zernike coefficients in meters
-        zkCoeff, *_ = np.linalg.lstsq(M, b, rcond=None)
-
-        return zkCoeff
-
-    def _fftSolve(self, I0: np.ndarray, dIdz: np.ndarray) -> np.ndarray:
-        """Solve the TIE using fast Fourier transforms.
-
-        Parameters
-        ----------
-        I0
-            The beam intensity at the exit pupil
-        dIdz
-            The gradient of the beam intensity across the exit pupil
-
-        Returns
-        -------
-        np.ndarray
-            Numpy array of the Zernike coefficients estimated from the image
-            or pair of images, in nm.
-        """
-        raise NotImplementedError
-
-    def estimateWf(
-        self,
-        I1: DonutStamp,
-        I2: DonutStamp,  # type: ignore[override]
-    ) -> np.ndarray:
-        """Return the wavefront Zernike coefficients in meters.
-
-        Parameters
-        ----------
-        I1 : DonutStamp
-            A stamp object containing an intra- or extra-focal donut image.
-        I2 : DonutStamp
-            A second stamp, on the opposite side of focus from I1.
-
-        Returns
-        -------
-        np.ndarray
-            Zernike coefficients (for Noll indices >= 4) estimated from
-            the images, in meters.
-        """
-        # Validate the DonutStamps
-        self._validateStamps(I1, I2)
 
         # Assign the intra and extrafocal images
         intra = I1 if I1.defocalType == DefocalType.Intra else I2
         extra = I1 if I1.defocalType == DefocalType.Extra else I2
 
         # Initialize Zernike arrays at zero
-        zkComp = np.zeros(self.jmax - 4 + 1)  # Zernikes for compensation
+        zkComp = np.zeros(jmax - 4 + 1)  # Zernikes for compensation
         zkResid = np.zeros_like(zkComp)  # Residual Zernikes after compensation
         zkBest = np.zeros_like(zkComp)  # Current best Zernike estimate
 
@@ -407,7 +404,7 @@ class TIEAlgorithm(WfAlgorithm):
         for i in range(self.maxIter):
             # Determine the maximum Noll index to compensate
             # Once the compensation sequence is exhausted, jmaxComp = jmax
-            jmaxComp = next(compSequence, self.jmax)
+            jmaxComp = next(compSequence, jmax)
 
             # Calculate zkComp for this iteration
             # The gain scales how much of previous residual we incorporate
@@ -416,8 +413,8 @@ class TIEAlgorithm(WfAlgorithm):
             zkComp[(jmaxComp - 3) :] = 0
 
             # Compensate images using the Zernikes
-            intraComp = self.imageMapper.imageToPupil(intra, zkComp).image
-            extraComp = self.imageMapper.imageToPupil(extra, zkComp).image
+            intraComp = imageMapper.imageToPupil(intra, zkComp).image
+            extraComp = imageMapper.imageToPupil(extra, zkComp).image
 
             # Check for caustics
             if (
@@ -442,15 +439,13 @@ class TIEAlgorithm(WfAlgorithm):
 
                 # Approximate I0 = I(x, 0) and dI/dz = dI(x, z)/dz at z=0
                 I0 = (intraComp + extraComp) / 2
-                dIdz = (intraComp - extraComp) / (
-                    2 * self.instrument.pupilOffset
-                )
+                dIdz = (intraComp - extraComp) / (2 * instrument.pupilOffset)
 
                 # Estimate the Zernikes
                 if self.solver == "exp":
-                    zkResid = self._expSolve(I0, dIdz)
+                    zkResid = self._expSolve(I0, dIdz, jmax, instrument)
                 elif self.solver == "fft":
-                    zkResid = self._fftSolve(I0, dIdz)
+                    zkResid = self._fftSolve(I0, dIdz, jmax, instrument)
 
                 # Check for convergence
                 # (1) The mean absolute difference with the previous iteration
@@ -460,7 +455,7 @@ class TIEAlgorithm(WfAlgorithm):
                 diffZk = zkBest - newBest
                 if (
                     np.mean(np.abs(diffZk)) < self.convergeTol
-                    and jmaxComp == self.jmax
+                    and jmaxComp >= jmax
                 ):
                     converged = True
 
