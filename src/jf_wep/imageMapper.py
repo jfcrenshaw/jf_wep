@@ -11,7 +11,12 @@ from scipy.spatial import ConvexHull, Delaunay
 
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils import DefocalType, loadConfig, mergeParams, zernikeGradEval
+from jf_wep.utils import (
+    DefocalType,
+    loadConfig,
+    mergeParams,
+    zernikeGradEval,
+)
 
 
 class ImageMapper:
@@ -284,35 +289,36 @@ class ImageMapper:
 
         return uPupil, vPupil, uImage, vImage, detJac
 
-    def _createImageMask(
+    def createImageMask(
         self,
-        uPupil: np.ndarray,
-        vPupil: np.ndarray,
-        uImage: np.ndarray,
-        vImage: np.ndarray,
+        donutStamp: DonutStamp,
+        zkCoeff: np.ndarray = np.zeros(1),
+        _mapping: Optional[tuple] = None,
     ) -> np.ndarray:
-        """Map the pupil mask to the image plane.
-
-        This is the private version of self.createImageMask() that
-        assumes you have already created the mapping between the
-        pupil and image planes.
+        """Create an image mask for the donut stamp.
 
         Parameters
         ----------
-        np.ndarray
-            Normalized x coordinates of the pupil grid
-        np.ndarray
-            Normalized y coordinates of the pupil grid
-        np.ndarray
-            Normalized x coordinates on the image plane
-        np.ndarray
-            Normalized y coordinates on the image plane
+        donutStamp : DonutStamp
+            The stamp object for which the image mask is created.
+        zkCoeff : np.ndarray, optional
+            The wavefront at the pupil, represented as Zernike coefficients
+            in meters, for Noll indices >= 4. Note this is in addition to
+            the intrinsic wavefront aberration.
+            (the default is zero)
 
         Returns
         -------
         np.ndarray
             The mask array.
         """
+        # Construct the map between the pupil and image planes
+        uPupil, vPupil, uImage, vImage, detJac = (
+            _mapping
+            if _mapping is not None
+            else self._constructMap(donutStamp, zkCoeff)
+        )
+
         # Unravel the grid points to be used below
         gridPoints = np.transpose((uPupil.ravel(), vPupil.ravel()))
 
@@ -348,17 +354,19 @@ class ImageMapper:
 
         return imageMask
 
-    def createImageMask(
+    def createImageTemplate(
         self,
         donutStamp: DonutStamp,
         zkCoeff: np.ndarray = np.zeros(1),
-    ) -> np.ndarray:
-        """Create an image mask for the donut stamp.
+        _mapping: Optional[tuple] = None,
+    ) -> DonutStamp:
+        """Create a template by mapping the pupil to the image plane.
 
         Parameters
         ----------
         donutStamp : DonutStamp
-            The stamp object for which the image mask is created.
+            A stamp object containing the metadata of the donut for which
+            the template is created.
         zkCoeff : np.ndarray, optional
             The wavefront at the pupil, represented as Zernike coefficients
             in meters, for Noll indices >= 4. Note this is in addition to
@@ -367,21 +375,36 @@ class ImageMapper:
 
         Returns
         -------
-        np.ndarray
-            The mask array.
+        DonutStamp
+            The donut template
         """
+        # Make a copy of the stamp
+        stamp = donutStamp.copy()
+
         # Construct the map between the pupil and image planes
-        uPupil, vPupil, uImage, vImage, detJac = self._constructMap(
-            donutStamp,
-            zkCoeff,
+        uPupil, vPupil, uImage, vImage, detJac = (
+            _mapping
+            if _mapping is not None
+            else self._constructMap(stamp, zkCoeff)
         )
 
-        return self._createImageMask(uPupil, vPupil, uImage, vImage)
+        # Replace the image with the pupil
+        stamp.image = self.instrument.createPupilMask(stamp.image.shape[0])
+
+        # Map the pupil to the image plane
+        template = self.pupilToImage(
+            stamp,
+            zkCoeff,
+            _mapping=(uPupil, vPupil, uImage, vImage, detJac),
+        )
+
+        return template
 
     def pupilToImage(
         self,
         donutStamp: DonutStamp,
         zkCoeff: np.ndarray = np.zeros(1),
+        _mapping: Optional[tuple] = None,
     ) -> DonutStamp:
         """Map a stamp from the pupil to the image plane.
 
@@ -405,15 +428,19 @@ class ImageMapper:
         stamp = donutStamp.copy()
 
         # Construct the map between the pupil and image planes
-        uPupil, vPupil, uImage, vImage, detJac = self._constructMap(
-            stamp,
-            zkCoeff,
+        uPupil, vPupil, uImage, vImage, detJac = (
+            _mapping
+            if _mapping is not None
+            else self._constructMap(stamp, zkCoeff)
         )
 
         # Create the pupil and image masks
-        # Mask the pupil
         pupilMask = self.instrument.createPupilMask(stamp.image.shape[0])
-        imageMask = self._createImageMask(uPupil, vPupil, uImage, vImage)
+        imageMask = self.createImageMask(
+            donutStamp,
+            zkCoeff,
+            _mapping=(uPupil, vPupil, uImage, vImage, detJac),
+        )
 
         # Use nearest neighbors to interpolate projected image points
         # onto a regular grid
@@ -434,6 +461,7 @@ class ImageMapper:
         self,
         donutStamp: DonutStamp,
         zkCoeff: np.ndarray = np.zeros(1),
+        _mapping: Optional[tuple] = None,
     ) -> DonutStamp:
         """Map a stamp from the image to the pupil plane.
 
@@ -457,8 +485,10 @@ class ImageMapper:
         stamp = donutStamp.copy()
 
         # Get the map between the pupil and image planes
-        uPupil, vPupil, uImage, vImage, detJac = self._constructMap(
-            stamp, zkCoeff
+        uPupil, vPupil, uImage, vImage, detJac = (
+            _mapping
+            if _mapping is not None
+            else self._constructMap(stamp, zkCoeff)
         )
 
         # Interpolate the array onto the pupil plane

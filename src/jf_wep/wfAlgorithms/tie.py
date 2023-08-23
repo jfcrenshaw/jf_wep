@@ -69,6 +69,7 @@ class TIEAlgorithm(WfAlgorithm):
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
         compGain: Optional[float] = None,
+        convergeTol: Optional[float] = None,
         saveHistory: Optional[bool] = None,
     ) -> None:
         super().__init__(
@@ -78,6 +79,7 @@ class TIEAlgorithm(WfAlgorithm):
             maxIter=maxIter,
             compSequence=compSequence,
             compGain=compGain,
+            convergeTol=convergeTol,
             saveHistory=saveHistory,
         )
 
@@ -180,8 +182,10 @@ class TIEAlgorithm(WfAlgorithm):
     def convergeTol(self, value: float) -> None:
         """Set the convergence tolerance."""
         value = float(value)
-        if value <= 0:
-            raise ValueError("convergeTol must be positive.")
+        if value < 0:
+            raise ValueError(
+                "convergeTol must be greater than or equal to zero."
+            )
         self._convergeTol = value
 
     @property
