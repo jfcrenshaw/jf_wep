@@ -27,12 +27,12 @@ class TIEAlgorithm(WfAlgorithm):
         Any explicitly passed parameters override values found in this file
         (the default is policy/wfAlgorithms/tie.yaml)
     addIntrinsic : bool, optional
-        Whether to explicitly add the intrinsic Zernike coefficients solved
-        for by the TIE. If False, the coefficients returned by the TIE
-        represent the full OPD. If True, the coefficients returned by the
-        TIE represent the wavefront deviation (i.e. OPD - intrinsic). If
-        the donuts provided to the TIE are at different field positions,
-        it is best to set addIntrinsic=True.
+        Whether to explicitly add the intrinsic Zernike coefficients to
+        those solved for by the TIE. If False, the coefficients returned
+        by the TIE represent the full OPD. If True, the coefficients
+        returned by the TIE represent the wavefront deviation
+        (i.e. OPD - intrinsic). If the donuts provided to the TIE are at
+        different field positions, it is best to set addIntrinsic=True.
     solver : str, optional
         Method used to solve the TIE. If "exp", the TIE is solved via
         directly expanding the wavefront in a Zernike series. If "fft",
@@ -54,11 +54,6 @@ class TIEAlgorithm(WfAlgorithm):
         Whether to save the algorithm history in the self.history attribute.
         If True, then self.history contains information about the most recent
         time the algorithm was run.
-
-    Raises
-    ------
-    ValueError
-        Invalid solver name
     """
 
     def __init__(

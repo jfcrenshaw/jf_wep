@@ -1,7 +1,7 @@
 # Default parameters for the TIE algorithm
 
-solver: exp
 addIntrinsic: True
+solver: exp
 maxIter: 20
 compSequence: [4, 4, 6, 6, 13, 13, 13, 13, 22, 22, 22, 22, 22, 22]
 compGain: 0.6

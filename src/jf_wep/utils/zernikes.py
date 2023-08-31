@@ -1,12 +1,9 @@
 """Functions for calculating Zernikes and related values."""
+from functools import lru_cache
 from typing import Tuple
 
 import galsim
 import numpy as np
-
-from jf_wep.instrument import Instrument
-
-from functools import lru_cache
 
 
 def createGalsimZernike(
@@ -33,11 +30,11 @@ def createGalsimZernike(
     )
 
 
-@lru_cache
 def createZernikeBasis(
+    u: np.ndarray,
+    v: np.ndarray,
     jmax: int = 28,
-    instrument: Instrument = Instrument(),
-    nPixels: int = 160,
+    obscuration: float = 0.61,
 ) -> np.ndarray:
     """Create a basis of Zernike polynomials for Noll indices >= 4.
 
@@ -47,45 +44,34 @@ def createZernikeBasis(
     the pupil, and u^2 + v^2 = obscuration^2 is the edge of the central
     obscuration.
     """
-    return galsim.zernike.zernikeBasis(
-        jmax,
-        *instrument.createPupilGrid(nPixels),
-        R_inner=instrument.obscuration,
-    )[4:]
+    return galsim.zernike.zernikeBasis(jmax, u, v, R_inner=obscuration)[4:]
 
 
-@lru_cache
 def createZernikeGradBasis(
+    u: np.ndarray,
+    v: np.ndarray,
     jmax: int = 28,
-    instrument: Instrument = Instrument(),
-    nPixels: int = 160,
+    obscuration: float = 0.61,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Create a basis of Zernike gradient polynomials for Noll indices >= 4."""
-    # Create the normalized pupil grid
-    uPupil, vPupil = instrument.createPupilGrid(nPixels)
-
     # Get the Noll coefficient array for the u derivates
-    nollCoeffU = galsim.zernike._noll_coef_array_xy_gradx(
-        jmax, instrument.obscuration
-    )
+    nollCoeffU = galsim.zernike._noll_coef_array_xy_gradx(jmax, obscuration)
     nollCoeffU = nollCoeffU[:, :, 3:]  # Keep only Noll indices >= 4
 
     # Evaluate the polynomials
     dzkdu = np.array(
         [
-            galsim.utilities.horner2d(uPupil, vPupil, nc, dtype=float)
+            galsim.utilities.horner2d(u, v, nc, dtype=float)
             for nc in nollCoeffU.transpose(2, 0, 1)
         ]
     )
 
     # Repeat for v
-    nollCoeffV = galsim.zernike._noll_coef_array_xy_grady(
-        jmax, instrument.obscuration
-    )
+    nollCoeffV = galsim.zernike._noll_coef_array_xy_grady(jmax, obscuration)
     nollCoeffV = nollCoeffV[:, :, 3:]  # Keep only Noll indices >= 4
     dzkdv = np.array(
         [
-            galsim.utilities.horner2d(uPupil, vPupil, nc, dtype=float)
+            galsim.utilities.horner2d(u, v, nc, dtype=float)
             for nc in nollCoeffV.transpose(2, 0, 1)
         ]
     )
