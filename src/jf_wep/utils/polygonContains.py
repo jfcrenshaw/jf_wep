@@ -32,7 +32,7 @@ def _polygonContainsRow(
     Returns
     -------
     np.ndarray
-        A 1D array with the same shape as row, indicating whether each point 
+        A 1D array with the same shape as row, indicating whether each point
         is inside the polygon
     """
     # If the row is totally outside the polygon, return False

@@ -166,11 +166,11 @@ class ImageMapper:
              Normalized x coordinates on the pupil plane
         vPupil : np.ndarray
              Normalized y coordinates on the image plane
-        donutStamp : DonutStamp
-            A stamp object containing the metadata required for the mapping.
         zkCoeff : np.ndarray
             The wavefront at the pupil, represented as Zernike coefficients
             in meters for Noll indices >= 4.
+        donutStamp : DonutStamp
+            A stamp object containing the metadata required for the mapping.
 
         Returns
         -------
@@ -322,14 +322,14 @@ class ImageMapper:
         Parameters
         ----------
         uImage : np.ndarray
-             Normalized x coordinates on the image plane
+            Normalized x coordinates on the image plane
         vImage : np.ndarray
-             Normalized y coordinates on the image plane
-        donutStamp : DonutStamp
-            A stamp object containing the metadata required for the mapping.
+            Normalized y coordinates on the image plane
         zkCoeff : np.ndarray
             The wavefront at the pupil, represented as Zernike coefficients
             in meters for Noll indices >= 4.
+        donutStamp : DonutStamp
+            A stamp object containing the metadata required for the mapping.
 
         Returns
         -------
@@ -445,6 +445,64 @@ class ImageMapper:
 
         return uPupil, vPupil, jac, jacDet
 
+    def _getImageGridInsidePupil(
+        self,
+        zkCoeff: np.ndarray,
+        donutStamp: DonutStamp,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return the image grid and a mask for which pixels are inside the pupil.
+
+        Note a pixel is considered inside the pupil if any fraction of the pixel
+        is inside the pupil. In addition, the pupil considered is the pupil
+        mapped to the image plane.
+
+        Parameters
+        ----------
+        zkCoeff : np.ndarray
+            The wavefront at the pupil, represented as Zernike coefficients
+            in meters for Noll indices >= 4.
+        donutStamp : DonutStamp
+            A stamp object containing the metadata required for the mapping.
+
+        Returns
+        -------
+        np.ndarray
+            Normalized x coordinates on the image plane
+        np.ndarray
+            Normalized y coordinates on the image plane
+        np.ndarray
+            Binary mask array indicating whether each pixel is inside the pupil
+        """
+        # Map pupil edge to the image to determine edge of pupil on the image
+        theta = np.linspace(0, 2 * np.pi, 100)
+        uPupil, vPupil = np.cos(theta), np.sin(theta)
+        uImageEdge, vImageEdge, *_ = self._constructForwardMap(
+            uPupil,
+            vPupil,
+            zkCoeff,
+            donutStamp,
+        )
+        imageEdge = np.array([uImageEdge, vImageEdge]).T
+
+        # Create an image grid
+        nPixels = donutStamp.image.shape[0]
+        uImage, vImage = self.instrument.createImageGrid(nPixels)
+
+        # Determine which image pixels have corners inside the pupil
+        dPixel = uImage[0, 1] - uImage[0, 0]
+        corners = np.append(uImage[0] - dPixel / 2, uImage[0, -1] + dPixel / 2)
+        cornersIn = polygonContains(*np.meshgrid(corners, corners), imageEdge)
+
+        # Select pixels that have at least one corner inside
+        inside = (
+            cornersIn[:-1, :-1]
+            | cornersIn[1:, :-1]
+            | cornersIn[:-1, 1:]
+            | cornersIn[1:, 1:]
+        )
+
+        return uImage, vImage, inside
+
     def _maskWithCircle(
         self,
         uPupil: np.ndarray,
@@ -452,7 +510,7 @@ class ImageMapper:
         uPupilCirc: float,
         vPupilCirc: float,
         rPupilCirc: float,
-        invMap: Optional[tuple] = None,
+        fwdMap: Optional[tuple] = None,
     ) -> np.ndarray:
         """Return a fractional mask for a single circle.
 
@@ -468,31 +526,32 @@ class ImageMapper:
             The v coordinate of the circle center
         rPupilCirc : float
             The normalized radius of the circle
-        invMap : tuple
+        fwdMap : tuple
             A tuple containing (uImage, vImage, jac, jacDet), i.e.
-            the output of self._constructInverseMap(uPupil, vPupil, ...)
+            the output of self._constructForwardMap(uPupil, vPupil, ...)
             If not None, the mask is mapped to the image plane.
             (the default is None)
         """
-        # TODO:
-        # - fix so that everything happens with regular grids determined internally
-        # - make sure I get pupil radii correct too
-        # - change the way invMap is described above, since it's wrong
-
         # Center the pupil coordinates on the circle's center
         uPupilCen = uPupil - uPupilCirc
         vPupilCen = vPupil - vPupilCirc
 
-        if invMap is not None:
-            # Unpack the inverse mapping
-            uImage, vImage, invJac, invJacDet = invMap
-            jac = np.array(
+        # The pixel scale in normalized coordinates is the inverse of the donut radius
+        pixelScale = 1 / self.instrument.donutRadius
+
+        # If a forward map is provided, begin preparing for mapping the mask
+        # to the image plane
+        if fwdMap is not None:
+            uImage, vImage, jac, jacDet = fwdMap
+
+            # Calculate quantities for the forward map
+            invJac = np.array(
                 [
-                    [+invJac[1, 1], -invJac[0, 1]],
-                    [-invJac[1, 0], +invJac[0, 0]],
+                    [+jac[1, 1], -jac[0, 1]],  # type: ignore
+                    [-jac[1, 0], +jac[0, 0]],  # type: ignore
                 ]
             )
-            jac /= invJacDet
+            invJac /= jacDet
 
             # Use a local linear approximation to center the image coordinates
             uImageCen = (
@@ -502,36 +561,17 @@ class ImageMapper:
                 vImage - jac[1, 0] * uPupilCirc - jac[1, 1] * vPupilCirc
             )
 
-            # Calculate the pixel scale from the grid
-            pixelScale = uImageCen[0, 1] - uImageCen[0, 0]
-
-            # Calculate the diagonal distance across each pixel
-            """diagL = np.sqrt(
-                (invJac[0, 0] + invJac[0, 1]) ** 2 + (invJac[1, 0] + invJac[1, 1]) ** 2
+            # Calculate the diagonal distance across each pixel on the pupil
+            diagL = np.sqrt(
+                (invJac[0, 0] + invJac[0, 1]) ** 2  # type: ignore
+                + (invJac[1, 0] + invJac[1, 1]) ** 2  # type: ignore
             )
             diagL *= pixelScale
-            """
-            h1 = np.sqrt(
-                (invJac[0, 0] + invJac[1, 1]) ** 2
-                + (invJac[0, 1] - invJac[1, 0]) ** 2
-            )
-            h2 = np.sqrt(
-                (invJac[0, 0] - invJac[1, 1]) ** 2
-                + (invJac[0, 1] + invJac[1, 0][1, 0]) ** 2
-            )
-            diagL = 0.5 * (h1 + h2) * pixelScale
-
-            # TODO: get this working. It probably has to do with the pixel scale?
-            # I.e. I wouldn't be shocked if I need to use the donut radius scaling
-            # Although I did a naive test and that didn't work...
 
         else:
             # Use the pupil coordinates as the image coordinates
             uImageCen = uPupilCen
             vImageCen = vPupilCen
-
-            # Calculate the pixel scale from the grid
-            pixelScale = uPupilCen[0, 1] - uPupilCen[0, 0]
 
             # Diagonal distance across a regular pixel
             diagL = np.sqrt(2) * pixelScale
@@ -549,7 +589,7 @@ class ImageMapper:
         out[inside] = 1
         out[outside] = 0
 
-        # If nothing is on the border, go ahead and return
+        # If nothing is on the border, go ahead and return the mask
         if not border.any():
             return out
 
@@ -562,15 +602,17 @@ class ImageMapper:
             np.sqrt(uPupilCen**2 + vPupilCen**2) * rPupilCirc / vPupilCen
         )  # intercept
 
-        if invMap is not None:
-            # Transform the slope and intercept to image coordinates
-            invJac = invJac[..., border]
-            den = -m * invJac[0, 1] + invJac[1, 1]
-            m = (m * invJac[0, 0] - invJac[1, 0]) / den
-            b = b / den
-
         # Select the border image coordinates
         uImageCen, vImageCen = uImageCen[border], vImageCen[border]
+
+        if fwdMap is not None:
+            # Transform the slope and intercept to image coordinates
+            invJac = invJac[..., border]  # type: ignore
+            a1 = m * invJac[0, 0] - invJac[1, 0]
+            a2 = m * uPupilCen + b - vPupilCen
+            a3 = -m * invJac[0, 1] + invJac[1, 1]
+            m = a1 / a3
+            b = (a2 - a1 * uImageCen) / a3 + vImageCen
 
         # Use symmetry to map everything onto the situation where -1 <= mImage <= 0
         mask = m > 0
@@ -621,22 +663,57 @@ class ImageMapper:
 
     def createPupilMask(
         self,
-        uPupil: np.ndarray,
-        vPupil: np.ndarray,
         donutStamp: DonutStamp,
+        *,
         binary: bool = False,
     ) -> np.ndarray:
         """Create the pupil mask for the stamp.
 
-        Note the uPupil and vPupil arrays must be regular 2D grids, like what is 
-        returned by np.meshgrid.
+        Parameters
+        ----------
+        donutStamp : DonutStamp
+            A stamp object containing the metadata required for constructing the mask.
+        binary : bool, optional
+            Whether to return a binary mask. If False, a fractional mask is returned
+            instead. (the default is False)
+
+        Returns
+        -------
+        np.ndarray
+            The pupil mask
+        """
+        # TODO: Generalize this to include other obscurations!
+
+        # Get the pupil grid
+        uPupil, vPupil = self.instrument.createPupilGrid()
+
+        # Combine masks for primary rim and the obscuration
+        primaryMask = self._maskWithCircle(uPupil, vPupil, 0, 0, 1)
+        obscMask = self._maskWithCircle(
+            uPupil, vPupil, 0, 0, self.instrument.obscuration
+        )
+        mask = np.min([primaryMask, 1 - obscMask], axis=0)
+
+        if binary:
+            mask = mask >= 1
+
+        return mask
+
+    def createImageMask(
+        self,
+        donutStamp: DonutStamp,
+        zkCoeff: np.ndarray = np.zeros(1),
+        *,
+        binary: bool = False,
+        _invMap: Optional[tuple] = None,
+    ) -> np.ndarray:
+        """Create the image mask for the stamp.
+
+        Note the uImage and vImage arrays must be regular 2D grids, like what is
+        be returned by np.meshgrid.
 
         Parameters
         ----------
-        uPupil : np.ndarray
-            Normalized x coordinates on the pupil plane
-        vPupil : np.ndarray
-            Normalized y coordinates on the pupil plane
         donutStamp : DonutStamp
             A stamp object containing the metadata required for constructing the mask.
         binary : bool, optional
@@ -648,49 +725,52 @@ class ImageMapper:
         np.ndarray
         """
         # TODO: Generalize this to include other obscurations!
-        # First mask the outer rim of the primary
-        mask = self._maskWithCircle(uPupil, vPupil, 0, 0, 1)
 
-        # Now mask the central obscuration
-        mask -= self._maskWithCircle(
-            uPupil, vPupil, 0, 0, self.instrument.obscuration
+        # Get the image grid inside the pupil
+        uImage, vImage, inside = self._getImageGridInsidePupil(
+            zkCoeff, donutStamp
         )
 
-        if binary is True:
+        # Get the inverse mapping from image plane to pupil plane
+        if _invMap is None:
+            # Construct the inverse mapping
+            uPupil, vPupil, invJac, invJacDet = self._constructInverseMap(
+                uImage[inside],
+                vImage[inside],
+                zkCoeff,
+                donutStamp,
+            )
+        else:
+            uPupil, vPupil, invJac, invJacDet = _invMap
+
+        # Rearrange into the forward map
+        jac = np.array(
+            [
+                [+invJac[1, 1], -invJac[0, 1]],  # type: ignore
+                [-invJac[1, 0], +invJac[0, 0]],  # type: ignore
+            ]
+        )
+        jac /= invJacDet
+        jacDet = 1 / invJacDet
+
+        # Package the forward mapping
+        fwdMap = (uImage[inside], vImage[inside], jac, jacDet)
+
+        # Combine masks for primary rim and the obscuration
+        primaryMask = self._maskWithCircle(uPupil, vPupil, 0, 0, 1, fwdMap)
+        obscMask = self._maskWithCircle(
+            uPupil, vPupil, 0, 0, self.instrument.obscuration, fwdMap
+        )
+        maskFill = np.min([primaryMask, 1 - obscMask], axis=0)
+
+        # Fill in the full mask
+        mask = np.zeros_like(uImage)
+        mask[inside] = maskFill
+
+        if binary:
             mask = mask >= 1
 
         return mask
-
-    def createImageMask(
-        self,
-        uImage: np.ndarray,
-        vImage: np.ndarray,
-        donutStamp: DonutStamp,
-        binary: bool = False,
-        _invMap: Optional[tuple] = None,
-    ) -> np.ndarray:
-        """Create the image mask for the stamp.
-
-        Note the uImage and vImage arrays must be regular 2D grids, like what is
-        be returned by np.meshgrid.
-
-        Parameters
-        ----------
-        uImage : np.ndarray
-                Normalized x coordinates on the image plane
-        vImage : np.ndarray
-                Normalized y coordinates on the image plane
-        donutStamp : DonutStamp
-            A stamp object containing the metadata required for constructing the mask.
-        binary : bool, optional
-            Whether to return a binary mask. If False, a fractional mask is returned
-            instead. (the default is False)
-
-        Returns
-        -------
-        np.ndarray
-        """
-        pass
 
     def mapPupilToImage(
         self,
@@ -719,33 +799,8 @@ class ImageMapper:
         # Make a copy of the stamp
         stamp = donutStamp.copy()
 
-        # Map pupil edge to the image to determine edge of pupil on the image
-        theta = np.linspace(0, 2 * np.pi, 100)
-        uPupil, vPupil = np.cos(theta), np.sin(theta)
-        uImageEdge, vImageEdge, *_ = self._constructForwardMap(
-            uPupil,
-            vPupil,
-            zkCoeff,
-            stamp,
-        )
-        imageEdge = np.array([uImageEdge, vImageEdge]).T
-
-        # Create an image grid
-        nPixels = stamp.image.shape[0]
-        uImage, vImage = self.instrument.createImageGrid(nPixels)
-
-        # Determine which image pixels have corners inside the pupil
-        dPixel = uImage[0, 1] - uImage[0, 0]
-        corners = np.append(uImage[0] - dPixel / 2, uImage[0, -1] + dPixel / 2)
-        cornersIn = polygonContains(*np.meshgrid(corners, corners), imageEdge)
-
-        # Select pixels that have at least one corner inside
-        inside = (
-            cornersIn[:-1, :-1]
-            | cornersIn[1:, :-1]
-            | cornersIn[:-1, 1:]
-            | cornersIn[1:, 1:]
-        )
+        # Get the image grid inside the pupil
+        uImage, vImage, inside = self._getImageGridInsidePupil(zkCoeff, stamp)
 
         # Construct the inverse mapping
         uPupil, vPupil, jac, jacDet = self._constructInverseMap(
@@ -755,22 +810,15 @@ class ImageMapper:
             stamp,
         )
 
-        # Fill the image with the Jacobian
-        # (this assumes the pupil is uniformly illuminated)
-        stamp.image = np.zeros_like(stamp.image)
-        stamp.image[inside] = jacDet
-
-        # TODO: Need to handle fractional masking here!
-        rPupil = np.sqrt(uPupil**2 + vPupil**2)
-        pupilMask = (rPupil >= self.instrument.obscuration) & (rPupil <= 1)
-        # stamp.image *= pupilMask
-
-        """mask1 = self._maskWithCircle(uPupil, vPupil, 0, 0, 1, invMap=(uImage, vImage, jac, jacDet))
-        mask2 = self._maskWithCircle(
-            uPupil, vPupil, 0, 0, self.instrument.obscuration, invMap=(uImage, vImage, jac, jacDet)
+        # Create the image mask
+        mask = self.createImageMask(
+            stamp, zkCoeff, _invMap=(uPupil, vPupil, jac, jacDet)
         )
-        mask = mask1 - mask2
-        stamp.image = mask"""
+
+        # Fill the image (this assumes that, except for vignetting, the pupil is
+        # uniformly illuminated)
+        stamp.image = np.zeros_like(stamp.image)
+        stamp.image[inside] = mask[inside] * jacDet
 
         return stamp
 
@@ -826,7 +874,7 @@ class ImageMapper:
         pupil = np.nan_to_num(pupil)
 
         # Mask the pupil
-        mask = self.createPupilMask(uPupil, vPupil, stamp)
+        mask = self.createPupilMask(stamp)
         pupil *= mask
 
         # Update the stamp with the new pupil image

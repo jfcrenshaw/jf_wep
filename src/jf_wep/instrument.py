@@ -159,6 +159,33 @@ class Instrument:
         """The expected donut diameter in pixels."""
         return 2 * self.donutRadius
 
+    def createPupilGrid(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Create a grid for the pupil.
+
+        The coordinates of the grid are in normalized pupil coordinates.
+        These coordinates are defined such that u^2 + v^2 = 1 is the outer
+        edge of the pupil, and u^2 + v^2 = obscuration^2 is the inner edge.
+
+        The number of pixels is chosen to match the resolution of the image.
+
+        Returns
+        -------
+        np.ndarray
+            The 2D u-grid on the pupil plane
+        np.ndarray
+            The 2D v-grid on the pupil plane
+        """
+        # Set the resolution equal to the resolution of the image
+        nPixels = np.ceil(self.donutDiameter).astype(int)
+
+        # Create a 1D array with the correct number of pixels
+        grid = np.linspace(-1, 1, nPixels)
+
+        # Create u and v grids
+        uPupil, vPupil = np.meshgrid(grid, grid)
+
+        return uPupil, vPupil
+
     def createImageGrid(self, nPixels: int) -> Tuple[np.ndarray, np.ndarray]:
         """Create an (nPixel x nPixel) grid for the image.
 
@@ -192,38 +219,3 @@ class Instrument:
         uImage, vImage = np.meshgrid(grid, grid)
 
         return uImage, vImage
-
-    def createPupilGrid(
-        self, nPixels: Optional[int] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Create an (nPixel x nPixel) grid for the pupil.
-
-        The coordinates of the grid are in normalized pupil coordinates.
-        These coordinates are defined such that u^2 + v^2 = 1 is the outer
-        edge of the pupil, and u^2 + v^2 = obscuration^2 is the inner edge.
-
-        Parameters
-        ----------
-        nPixels : int, optional
-            The number of pixels on a side. If None, then the number of pixels
-            is chosen to match the resolution of the image.
-            (the default is None)
-
-        Returns
-        -------
-        np.ndarray
-            The 2D u-grid on the pupil plane
-        np.ndarray
-            The 2D v-grid on the pupil plane
-        """
-        # Set the resolution equal to the resolution of the image
-        nPixels = np.ceil(self.donutDiameter) if nPixels is None else nPixels
-        nPixels = int(nPixels)
-
-        # Create a 1D array with the correct number of pixels
-        grid = np.linspace(-1, 1, nPixels)
-
-        # Create u and v grids
-        uPupil, vPupil = np.meshgrid(grid, grid)
-
-        return uPupil, vPupil
