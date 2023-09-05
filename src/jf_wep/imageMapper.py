@@ -259,6 +259,7 @@ class ImageMapper:
 
         # Map the pupil grid onto the image plane
         rPupil = np.sqrt(uPupil**2 + vPupil**2)
+
         with np.errstate(invalid="ignore"):
             prefactor = np.sqrt((4 * N**2 - 1) / (4 * N**2 - rPupil**2))
         uImage = prefactor * (
@@ -290,8 +291,7 @@ class ImageMapper:
             ]
         )
 
-        """
-        num = np.sqrt(4 * N**2 - 1)
+        """num = np.sqrt(4 * N**2 - 1)
         with np.errstate(invalid="ignore"):
             den = np.sqrt(4 * N**2 - rPupil**2)
         F = -defocalSign * num / den
@@ -303,8 +303,13 @@ class ImageMapper:
         J01 = F * uPupil * vPupil / den**2 + C * d2Wdvdu
         J10 = F * vPupil * uPupil / den**2 + C * d2Wdudv
         J11 = F * (1 + vPupil**2 / den**2) + C * d2Wdvdv
-        """
-
+        jac = np.array(
+            [
+                [J00, J01],
+                [J10, J11],
+            ]
+        )"""
+        
         # And the determinant
         jacDet = J00 * J11 - J01 * J10
 
@@ -815,8 +820,8 @@ class ImageMapper:
             stamp, zkCoeff, _invMap=(uPupil, vPupil, jac, jacDet)
         )
 
-        # Fill the image (this assumes that, except for vignetting, the pupil is
-        # uniformly illuminated)
+        # Fill the image (this assumes that, except for vignetting,
+        # the pupil is uniformly illuminated)
         stamp.image = np.zeros_like(stamp.image)
         stamp.image[inside] = mask[inside] * jacDet
 

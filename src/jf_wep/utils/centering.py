@@ -49,7 +49,7 @@ def centerWithTemplate(
 
         # First create a pixel grid, and a small bounding box around idxMax
         grid = np.arange(image.shape[0])
-        bounds = idxMax[:, None] + [-2, 2]  # type: ignore
+        bounds = idxMax[:, None] + [-5, 5]  # type: ignore
         ySlice = slice(*bounds[0] + [0, 1])
         xSlice = slice(*bounds[1] + [0, 1])
 
@@ -59,7 +59,7 @@ def centerWithTemplate(
                 (grid[ySlice], grid[xSlice]),
                 corr[ySlice, xSlice],
                 pixels,
-                method="cubic",
+                method="splinef2d",
             )
 
         # Find the maximum correlation with subpixel resolution

@@ -1,5 +1,4 @@
 """Functions for calculating Zernikes and related values."""
-from functools import lru_cache
 from typing import Tuple
 
 import galsim

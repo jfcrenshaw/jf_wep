@@ -10,6 +10,7 @@ from jf_wep.imageMapper import ImageMapper
 from jf_wep.instrument import Instrument
 from jf_wep.utils import (
     DefocalType,
+    centerWithTemplate,
     createZernikeBasis,
     createZernikeGradBasis,
 )
@@ -192,7 +193,7 @@ class TIEAlgorithm(WfAlgorithm):
     def saveHistory(self, value: bool) -> None:
         """Set saveHistory."""
         if not isinstance(value, bool):
-            raise TypeError("saveHistory must be a bool.")
+            raise TypeError("saveHistory must be a boolean.")
         self._saveHistory = value
 
         # If we are turning history-saving off, delete any old history
@@ -284,8 +285,14 @@ class TIEAlgorithm(WfAlgorithm):
             or pair of images, in nm.
         """
         # Get Zernike Bases
-        zk = createZernikeBasis(jmax, instrument, I0.shape[0])
-        dzkdu, dzkdv = createZernikeGradBasis(jmax, instrument, I0.shape[0])
+        uPupil, vPupil = instrument.createPupilGrid()
+        zk = createZernikeBasis(uPupil, vPupil, jmax, instrument.obscuration)
+        dzkdu, dzkdv = createZernikeGradBasis(
+            uPupil,
+            vPupil,
+            jmax,
+            instrument.obscuration,
+        )
 
         # Calculate quantities for the linear equation
         b = -np.einsum("ab,jab->j", dIdz, zk, optimize=True)
@@ -383,9 +390,17 @@ class TIEAlgorithm(WfAlgorithm):
             addIntrinsic=self.addIntrinsic,
         )
 
-        # Assign the intra and extrafocal images
+        # Get the initial intrafocal and extrafocal stamps
         intra = I1 if I1.defocalType == DefocalType.Intra else I2
         extra = I1 if I1.defocalType == DefocalType.Extra else I2
+
+        # Create un-aberrated templates for both donuts
+        intraTemplate = imageMapper.mapPupilToImage(intra)
+        extraTemplate = imageMapper.mapPupilToImage(extra)
+
+        # Center the donuts using these templates
+        intra.image = centerWithTemplate(intra.image, intraTemplate.image)
+        extra.image = centerWithTemplate(extra.image, extraTemplate.image)
 
         # Initialize Zernike arrays at zero
         zkComp = np.zeros(jmax - 4 + 1)  # Zernikes for compensation
@@ -412,8 +427,8 @@ class TIEAlgorithm(WfAlgorithm):
             zkComp[(jmaxComp - 3) :] = 0
 
             # Compensate images using the Zernikes
-            intraComp = imageMapper.imageToPupil(intra, zkComp).image
-            extraComp = imageMapper.imageToPupil(extra, zkComp).image
+            intraComp = imageMapper.mapImageToPupil(intra, zkComp).image
+            extraComp = imageMapper.mapImageToPupil(extra, zkComp).image
 
             # Check for caustics
             if (
@@ -463,7 +478,7 @@ class TIEAlgorithm(WfAlgorithm):
 
             # Time to wrap up this iteration!
             # Should we save intermediate products in the algorithm history?
-            if self._saveHistory:
+            if self.saveHistory:
                 # Save the images and Zernikes from this iteration
                 self._history[i] = {
                     "intraComp": intraComp.copy(),
