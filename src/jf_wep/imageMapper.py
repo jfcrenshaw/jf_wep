@@ -700,7 +700,7 @@ class ImageMapper:
         mask = np.min([primaryMask, 1 - obscMask], axis=0)
 
         if binary:
-            mask = mask >= 1
+            mask = mask >= 0.5
 
         return mask
 
@@ -773,7 +773,7 @@ class ImageMapper:
         mask[inside] = maskFill
 
         if binary:
-            mask = mask >= 1
+            mask = mask >= 0.5
 
         return mask
 
