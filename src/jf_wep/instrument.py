@@ -219,3 +219,34 @@ class Instrument:
         uImage, vImage = np.meshgrid(grid, grid)
 
         return uImage, vImage
+
+    @property
+    def maskParams(self) -> dict:
+        """Return the mask parameters."""
+        # Get the parameters if they exist
+        params = getattr(self, "_maskParams", None)
+
+        if params is None:
+            # If they don't exist, use the primary inner and outer radii
+            params = {
+                "pupilOuter": {
+                    "thetaMin": 0,
+                    "center": [0],
+                    "radius": [self.radius],
+                },
+                "pupilInner": {
+                    "thetaMin": 0,
+                    "center": [0],
+                    "radius": [self.obscuration],
+                },
+            }
+
+        return params
+
+    @maskParams.setter
+    def maskParams(self, value: Optional[dict]) -> None:
+        """Set the mask parameters."""
+        if isinstance(value, dict) or value is None:
+            self._maskParams = value
+        else:
+            raise TypeError("maskParams must be a dictionary or None.")

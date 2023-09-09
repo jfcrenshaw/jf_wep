@@ -23,6 +23,8 @@ from jf_wep.utils import (
 class ImageMapper:
     """Class for mapping the pupil to the image plane, and vice versa.
 
+    This class also creates image masks.
+
     Parameters
     ----------
     configFile : Path or str, optional
@@ -130,7 +132,7 @@ class ImageMapper:
 
         # TODO: add field dependence here
         zkIntrinsic = (
-            batoid.zernike(
+            batoid.zernikeTA(
                 telescope,
                 *np.deg2rad(fieldAngle),
                 wavelength,
@@ -309,7 +311,25 @@ class ImageMapper:
                 [J10, J11],
             ]
         )"""
-        
+
+        """f = self.instrument.focalLength
+        R = self.instrument.radius
+        prefactor = -np.sqrt(f**2 - R**2) / f
+        C = f / (l * R**2)
+        uImage = prefactor * (defocalSign * uPupil + C * d1Wdu)
+        vImage = prefactor * (defocalSign * vPupil + C * d1Wdv)
+
+        J00 = prefactor * (defocalSign + C * d2Wdudu)
+        J01 = prefactor * C * d2Wdvdu
+        J10 = prefactor * C * d2Wdudv
+        J11 = prefactor * (defocalSign + C * d2Wdvdv)
+        jac = np.array(
+            [
+                [J00, J01],
+                [J10, J11],
+            ]
+        )"""
+
         # And the determinant
         jacDet = J00 * J11 - J01 * J10
 
@@ -536,6 +556,11 @@ class ImageMapper:
             the output of self._constructForwardMap(uPupil, vPupil, ...)
             If not None, the mask is mapped to the image plane.
             (the default is None)
+
+        Returns
+        -------
+        np.ndarray
+            Fractional mask with the same shape as uPupil
         """
         # Center the pupil coordinates on the circle's center
         uPupilCen = uPupil - uPupilCirc
@@ -666,6 +691,103 @@ class ImageMapper:
 
         return out
 
+    def _maskLoop(
+        self,
+        donutStamp: DonutStamp,
+        uPupil: np.ndarray,
+        vPupil: np.ndarray,
+        fwdMap: Optional[tuple] = None,
+        binary: bool = False,
+    ) -> np.ndarray:
+        """Loop through mask elements to create the mask.
+
+        Parameters
+        ----------
+        donutStamp : DonutStamp
+            A stamp object containing the metadata required for constructing the mask.
+        uPupil : np.ndarray
+            Normalized x coordinates on the pupil plane
+        vPupil : np.ndarray
+            Normalized y coordinates on the pupil plane
+        fwdMap : tuple
+            A tuple containing (uImage, vImage, jac, jacDet), i.e.
+            the output of self._constructForwardMap(uPupil, vPupil, ...)
+            If not None, the mask is mapped to the image plane.
+            (the default is None)
+        binary : bool, optional
+            Whether to return a binary mask. If False, a fractional mask is returned
+            instead. (the default is False)
+
+        Returns
+        -------
+        np.ndarray
+            A flattened mask array
+        """
+        # Get the field angle, but clip small angles to avoid divide by zero
+        angle = np.clip(donutStamp.fieldAngle, 1e-16, None)
+
+        # Get the angle radius
+        rTheta = np.sqrt(np.sum(np.square(angle)))
+
+        # Flatten the pupil arrays
+        uPupil, vPupil = uPupil.ravel(), vPupil.ravel()
+
+        # If a forward map is provided, flatten those arrays too
+        if fwdMap is not None:
+            uImage, vImage, jac, jacDet = fwdMap
+            uImage, vImage = uImage.ravel(), vImage.ravel()
+            jac = jac.reshape(2, 2, -1)
+            jacDet = jacDet.ravel()
+
+        # Get the mask parameters from the instrument
+        maskParams = self.instrument.maskParams
+
+        # Start with a full mask
+        mask = np.ones_like(uPupil)
+
+        # Loop over each mask element
+        for key, val in maskParams.items():
+            # Get the indices of non-zero pixels
+            idx = np.nonzero(mask)[0]
+
+            # If all the pixels are zero, stop here
+            if not idx.any():
+                break
+
+            # Only apply this mask if we're past thetaMin
+            if rTheta < val["thetaMin"]:
+                continue
+
+            # Calculate the radius and center of the mask
+            radius = np.polyval(val["radius"], rTheta)
+            rCenter = np.polyval(val["center"], rTheta)
+
+            uCenter = rCenter * angle[0] / rTheta
+            vCenter = rCenter * angle[1] / rTheta
+
+            # Calculate the mask values
+            maskVals = self._maskWithCircle(
+                uPupil=uPupil[idx],
+                vPupil=vPupil[idx],
+                uPupilCirc=uCenter,
+                vPupilCirc=vCenter,
+                rPupilCirc=radius,
+                fwdMap=None
+                if fwdMap is None
+                else (uImage[idx], vImage[idx], jac[..., idx], jacDet[idx]),
+            )
+
+            # Assign the mask values
+            if key.endswith("Inner"):
+                mask[idx] = np.minimum(mask[idx], 1 - maskVals)
+            else:
+                mask[idx] = np.minimum(mask[idx], maskVals)
+
+        if binary:
+            mask = mask >= 0.5
+
+        return mask
+
     def createPupilMask(
         self,
         donutStamp: DonutStamp,
@@ -687,20 +809,21 @@ class ImageMapper:
         np.ndarray
             The pupil mask
         """
-        # TODO: Generalize this to include other obscurations!
 
         # Get the pupil grid
         uPupil, vPupil = self.instrument.createPupilGrid()
 
-        # Combine masks for primary rim and the obscuration
-        primaryMask = self._maskWithCircle(uPupil, vPupil, 0, 0, 1)
-        obscMask = self._maskWithCircle(
-            uPupil, vPupil, 0, 0, self.instrument.obscuration
+        # Get the mask by looping over the mask elements
+        mask = self._maskLoop(
+            donutStamp=donutStamp,
+            uPupil=uPupil,
+            vPupil=vPupil,
+            fwdMap=None,
+            binary=binary,
         )
-        mask = np.min([primaryMask, 1 - obscMask], axis=0)
 
-        if binary:
-            mask = mask >= 0.5
+        # Restore the mask shape
+        mask = mask.reshape(uPupil.shape)
 
         return mask
 
@@ -729,8 +852,6 @@ class ImageMapper:
         -------
         np.ndarray
         """
-        # TODO: Generalize this to include other obscurations!
-
         # Get the image grid inside the pupil
         uImage, vImage, inside = self._getImageGridInsidePupil(
             zkCoeff, donutStamp
@@ -761,19 +882,15 @@ class ImageMapper:
         # Package the forward mapping
         fwdMap = (uImage[inside], vImage[inside], jac, jacDet)
 
-        # Combine masks for primary rim and the obscuration
-        primaryMask = self._maskWithCircle(uPupil, vPupil, 0, 0, 1, fwdMap)
-        obscMask = self._maskWithCircle(
-            uPupil, vPupil, 0, 0, self.instrument.obscuration, fwdMap
+        # Get the mask by looping over the mask elements
+        mask = np.zeros_like(inside)
+        mask[inside] = self._maskLoop(
+            donutStamp=donutStamp,
+            uPupil=uPupil,
+            vPupil=vPupil,
+            fwdMap=fwdMap,
+            binary=binary,
         )
-        maskFill = np.min([primaryMask, 1 - obscMask], axis=0)
-
-        # Fill in the full mask
-        mask = np.zeros_like(uImage)
-        mask[inside] = maskFill
-
-        if binary:
-            mask = mask >= 0.5
 
         return mask
 

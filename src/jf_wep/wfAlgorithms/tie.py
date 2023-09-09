@@ -481,6 +481,8 @@ class TIEAlgorithm(WfAlgorithm):
             if self.saveHistory:
                 # Save the images and Zernikes from this iteration
                 self._history[i] = {
+                    "intraCent": intra.copy(),
+                    "extraCent": extra.copy(),
                     "intraComp": intraComp.copy(),
                     "extraComp": extraComp.copy(),
                     "I0": I0.copy(),

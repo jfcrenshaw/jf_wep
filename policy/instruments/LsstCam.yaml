@@ -7,3 +7,61 @@ obscuration: 0.612 # fractional obscuration
 focalLength: 10.312 # effective focal length in meters
 defocalOffset: 1.5e-3 # defocal offset in meters
 pixelSize: 10.0e-6 # pixel size in meters
+
+maskParams:
+  M1Outer:
+    thetaMin: 0.0
+    center: [-1.8875e-17, 4.8166e-17, 4.2285e-11, 7.1252e-18]
+    radius: [-2.6279e-17, -6.3437e-16, 1.4260e-15, 1.0000e+00]
+  M1Inner:
+    thetaMin: 0.0
+    center: [-4.3884e-18, 3.1431e-17, -1.1465e-03, 1.9173e-17]
+    radius: [-2.8250e-16, 6.1767e-16, -2.4630e-16, 6.1196e-01]
+  M2Outer:
+    thetaMin: 0.67
+    center: [-7.1068e-06, 2.8587e-04, -6.9420e-02, -4.8251e-05]
+    radius: [-3.0468e-05, 1.9176e-04, -2.6475e-04, 1.0758e+00]
+  M2Inner:
+    thetaMin: 0.0
+    center: [-3.8822e-05, -2.0307e-04, -6.9605e-02, -5.4014e-07]
+    radius: [5.5425e-06, 6.0780e-05, 3.0347e-05, 5.6720e-01]
+  M3Outer:
+    thetaMin: 1.14
+    center: [-2.4641e-04, -1.4609e-03, -1.9030e-01, 6.9565e-06]
+    radius: [3.2325e-05, -1.3198e-04, 8.6280e-04, 1.2478e+00]
+  M3Inner:
+    thetaMin: 1.15
+    center: [-4.3008e-04, 8.1140e-04, -2.2436e-01, 2.6321e-04]
+    radius: [-1.4587e-04, 1.2824e-04, 4.1992e-05, 2.9232e-01]
+  L1Entrance:
+    thetaMin: 1.48
+    center: [-1.6854e-02, 2.0344e-02, -4.3071e-01, 4.4854e-02]
+    radius: [1.5617e-02, -6.3443e-02, 1.1559e-01, 1.5486e+00]
+  L1Exit:
+    thetaMin: 1.54
+    center: [-2.6215e-02, 6.6987e-02, -5.1175e-01, 9.3795e-02]
+    radius: [2.4419e-02, -1.0973e-01, 1.9888e-01, 1.5279e+00]
+  L2Entrance:
+    thetaMin: 1.59
+    center: [-5.8548e-02, 3.2199e-02, -5.3669e-01, -1.0209e-02]
+    radius: [6.4486e-02, -1.9451e-01, 2.4358e-01, 1.8921e+00]
+  L2Exit:
+    thetaMin: 1.77
+    center: [-7.7327e-03, -3.8334e-01, 4.0646e-01, -6.7140e-01]
+    radius: [2.0573e-03, 2.4270e-01, -7.0449e-01, 2.7022e+00]
+  L3Entrance:
+    thetaMin: 1.81
+    center: [-1.6577e+03, 9.1806e+03, -1.6968e+04, 1.0462e+04]
+    radius: [1.6724e+03, -9.2724e+03, 1.7150e+04, -1.0577e+04]
+  L3Exit:
+    thetaMin: 1.88
+    center: [-1.8242e+04, 1.0483e+05, -2.0082e+05, 1.2825e+05]
+    radius: [1.8304e+04, -1.0521e+05, 2.0162e+05, -1.2879e+05]
+  filterEntrance:
+    thetaMin: 1.68
+    center: [-3.3778e+01, 1.6946e+02, -2.8917e+02, 1.6521e+02]
+    radius: [3.5123e+01, -1.7840e+02, 3.0519e+02, -1.7224e+02]
+  filterExit:
+    thetaMin: 1.72
+    center: [-5.5778e+01, 2.8732e+02, -5.0011e+02, 2.9146e+02]
+    radius: [5.7577e+01, -2.9929e+02, 5.2248e+02, -3.0264e+02]
