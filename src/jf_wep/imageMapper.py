@@ -566,7 +566,7 @@ class ImageMapper:
         uPupilCen = uPupil - uPupilCirc
         vPupilCen = vPupil - vPupilCirc
 
-        # The pixel scale in normalized coordinates is the inverse of the donut radius
+        # Pixel scale in normalized coordinates is inverse of the donut radius
         pixelScale = 1 / self.instrument.donutRadius
 
         # If a forward map is provided, begin preparing for mapping the mask
@@ -883,7 +883,7 @@ class ImageMapper:
         fwdMap = (uImage[inside], vImage[inside], jac, jacDet)
 
         # Get the mask by looping over the mask elements
-        mask = np.zeros_like(inside)
+        mask = np.zeros_like(inside, dtype=float)
         mask[inside] = self._maskLoop(
             donutStamp=donutStamp,
             uPupil=uPupil,
