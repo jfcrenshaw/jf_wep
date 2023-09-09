@@ -132,7 +132,7 @@ class ImageMapper:
 
         # TODO: add field dependence here
         zkIntrinsic = (
-            batoid.zernikeTA(
+            batoid.zernike(
                 telescope,
                 *np.deg2rad(fieldAngle),
                 wavelength,
