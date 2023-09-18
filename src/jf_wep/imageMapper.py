@@ -235,35 +235,23 @@ class ImageMapper:
             )
 
             # Calculate the prefactor
+            prefactor = np.sqrt(4 * N**2 - 1)
+
+            # Calculate the factors F and C
             rPupil = np.sqrt(uPupil**2 + vPupil**2)
             with np.errstate(invalid="ignore"):
-                prefactor = np.sqrt(
-                    (4 * N**2 - 1) / (4 * N**2 - rPupil**2)
-                )
+                F = -defocalSign / np.sqrt(4 * N**2 - rPupil**2)
+            C = - 2 * N / l
 
             # Map the pupil points onto the image plane
-            uImage = prefactor * (
-                -defocalSign * uPupil - 4 * N**2 / l * (d1Wdu - d1Wdu0)
-            )
-            vImage = prefactor * (
-                -defocalSign * vPupil - 4 * N**2 / l * (d1Wdv - d1Wdv0)
-            )
+            uImage = prefactor * (F * uPupil + C * (d1Wdu - d1Wdu0))
+            vImage = prefactor * (F * vPupil + C * (d1Wdv - d1Wdv0))
 
             # Calculate the elements of the Jacobian
-            J00 = uPupil * uImage / (4 * N**2 - rPupil**2) - prefactor * (
-                defocalSign + 4 * N**2 / l * d2Wdudu
-            )
-            J01 = (
-                vPupil * uImage / (4 * N**2 - rPupil**2)
-                - prefactor * 4 * N**2 / l * d2Wdvdu
-            )
-            J10 = (
-                uPupil * vImage / (4 * N**2 - rPupil**2)
-                - prefactor * 4 * N**2 / l * d2Wdudv
-            )
-            J11 = vPupil * vImage / (4 * N**2 - rPupil**2) - prefactor * (
-                defocalSign + 4 * N**2 / l * d2Wdvdv
-            )
+            J00 = prefactor * (F + F**3 * uPupil**2 + C * d2Wdudu)
+            J01 = prefactor * (F**3 * uPupil * vPupil + C * d2Wdvdu)
+            J10 = prefactor * (F**3 * vPupil * uPupil + C * d2Wdudv)
+            J11 = prefactor * (F + F**3 * vPupil**2 + C * d2Wdvdv)
 
         else:
             # The offAxis model uses a numerically-fit model from batoid
