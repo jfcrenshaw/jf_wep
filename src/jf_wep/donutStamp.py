@@ -1,11 +1,11 @@
 """Class to hold donut images along with metadata."""
 from copy import deepcopy
-from typing import Union, Optional
+from typing import Optional, Union
 
 import numpy as np
 from typing_extensions import Self
 
-from jf_wep.utils import DefocalType, BandLabel, PlaneType
+from jf_wep.utils import BandLabel, DefocalType, PlaneType
 
 
 class DonutStamp:
@@ -21,12 +21,13 @@ class DonutStamp:
     defocalType : DefocalType or str
         Whether the image is intra- or extra-focal.
         Can be specified using a DefocalType Enum or the corresponding string.
-    planeType : PlaneType or str
-        Whether the image is on the image plane or the pupil plane.
-        Can be specified using a PlaneType Enum, or the corresponding string.
     bandLabel : BandLabel or str
         Photometric filter for the exposure.
         Can be specified using a BandLabel Enum or the corresponding string.
+    planeType : PlaneType or str, optional
+        Whether the image is on the image plane or the pupil plane.
+        Can be specified using a PlaneType Enum, or the corresponding string.
+        (the default is PlaneType.Image)
     blendOffsets : np.ndarray or tuple or list, optional
         Positions of blended donuts relative to location of center donut,
         in pixels. Must be provided in the format [dxList, dyList].
@@ -42,16 +43,16 @@ class DonutStamp:
         image: np.ndarray,
         fieldAngle: Union[np.ndarray, tuple, list],
         defocalType: Union[DefocalType, str],
+        bandLabel: Union[BandLabel, str],
         planeType: Union[PlaneType, str] = PlaneType.Image,
-        bandLabel: Union[BandLabel, str] = BandLabel.REF,
         blendOffsets: Union[np.ndarray, tuple, list] = np.zeros((2, 0)),
         mask: Optional[np.ndarray] = None,
     ) -> None:
         self.image = image
         self.fieldAngle = fieldAngle  # type: ignore
         self.defocalType = defocalType  # type: ignore
-        self.planeType = planeType  # type: ignore
         self.bandLabel = bandLabel  # type: ignore
+        self.planeType = planeType  # type: ignore
         self.blendOffsets = blendOffsets  # type: ignore
         self.mask = mask
 

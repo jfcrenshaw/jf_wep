@@ -1,1 +1,2 @@
 instConfig: policy/instruments/LsstCam.yaml
+opticalModel: offAxis

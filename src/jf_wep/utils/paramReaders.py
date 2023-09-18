@@ -1,7 +1,7 @@
 """Functions for reading parameters from files."""
+import inspect
 from pathlib import Path
 from typing import Any, Union
-import inspect
 
 import yaml
 

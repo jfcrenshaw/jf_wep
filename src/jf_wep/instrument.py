@@ -286,7 +286,7 @@ class Instrument:
         """
         if self.batoidModelName is None:
             return None
-        
+
         # Get the band string from the Enum
         band = BandLabel(band).value
 
@@ -405,7 +405,9 @@ class Instrument:
         defocalType = DefocalType(defocalType)
         defocalSign = +1 if defocalType == DefocalType.Extra else -1
         offset = defocalSign * self.defocalOffset
-        batoidModel = batoidModel.withGloballyShiftedOptic("Detector", [0, 0, offset])
+        batoidModel = batoidModel.withGloballyShiftedOptic(
+            "Detector", [0, 0, offset]
+        )
 
         # Get the wavelength
         if isinstance(self.wavelength, dict):
@@ -429,7 +431,7 @@ class Instrument:
         zkIntrinsic = zkIntrinsic[4:]
 
         return zkIntrinsic
-    
+
     @property
     def maskParams(self) -> dict:
         """Return the mask parameters."""
