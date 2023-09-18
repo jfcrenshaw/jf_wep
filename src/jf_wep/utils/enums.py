@@ -2,12 +2,17 @@
 from enum import Enum
 
 
+class PlaneType(Enum):
+    Image = "image"
+    Pupil = "pupil"
+
+
 class DefocalType(Enum):
     Intra = "intra"
     Extra = "extra"
 
 
-class FilterLabel(Enum):
+class BandLabel(Enum):
     LSST_U = "u"
     LSST_G = "g"
     LSST_R = "r"

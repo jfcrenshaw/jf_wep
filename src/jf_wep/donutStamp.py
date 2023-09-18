@@ -1,11 +1,11 @@
 """Class to hold donut images along with metadata."""
 from copy import deepcopy
-from typing import Union
+from typing import Union, Optional
 
 import numpy as np
 from typing_extensions import Self
 
-from jf_wep.utils import DefocalType, FilterLabel
+from jf_wep.utils import DefocalType, BandLabel, PlaneType
 
 
 class DonutStamp:
@@ -20,17 +20,21 @@ class DonutStamp:
         is the angle to the source, measured from the optical axis.
     defocalType : DefocalType or str
         Whether the image is intra- or extra-focal.
-        Can be specified using a DefocalType Enum,
-        or the corresponding string.
-    filterLabel : FilterLabel or str
+        Can be specified using a DefocalType Enum or the corresponding string.
+    planeType : PlaneType or str
+        Whether the image is on the image plane or the pupil plane.
+        Can be specified using a PlaneType Enum, or the corresponding string.
+    bandLabel : BandLabel or str
         Photometric filter for the exposure.
-        Can be specified using a FilterLabel Enum,
-        or the corresponding string.
+        Can be specified using a BandLabel Enum or the corresponding string.
     blendOffsets : np.ndarray or tuple or list, optional
         Positions of blended donuts relative to location of center donut,
         in pixels. Must be provided in the format [dxList, dyList].
         The lengths of dxList and dyList must be the same.
         (the default is an empty array, i.e. no blends)
+    mask : np.ndarray, optional
+        The mask for the image. Mask creation is meant to be handled by the
+        ImageMapper class.
     """
 
     def __init__(
@@ -38,14 +42,18 @@ class DonutStamp:
         image: np.ndarray,
         fieldAngle: Union[np.ndarray, tuple, list],
         defocalType: Union[DefocalType, str],
-        filterLabel: Union[FilterLabel, str] = FilterLabel.REF,
+        planeType: Union[PlaneType, str] = PlaneType.Image,
+        bandLabel: Union[BandLabel, str] = BandLabel.REF,
         blendOffsets: Union[np.ndarray, tuple, list] = np.zeros((2, 0)),
+        mask: Optional[np.ndarray] = None,
     ) -> None:
         self.image = image
         self.fieldAngle = fieldAngle  # type: ignore
         self.defocalType = defocalType  # type: ignore
-        self.filterLabel = filterLabel  # type: ignore
+        self.planeType = planeType  # type: ignore
+        self.bandLabel = bandLabel  # type: ignore
         self.blendOffsets = blendOffsets  # type: ignore
+        self.mask = mask
 
     @property
     def image(self) -> np.ndarray:
@@ -80,7 +88,7 @@ class DonutStamp:
 
     @property
     def defocalType(self) -> DefocalType:
-        """Return the DefocalType Enum of the image.
+        """Return the DefocalType Enum of the stamp.
 
         For details about this parameter, see the class docstring.
         """
@@ -88,34 +96,48 @@ class DonutStamp:
 
     @defocalType.setter
     def defocalType(self, value: Union[DefocalType, str]) -> None:
-        if isinstance(value, str):
+        if isinstance(value, str) or isinstance(value, DefocalType):
             self._defocalType = DefocalType(value)
-        elif isinstance(value, DefocalType):
-            self._defocalType = value
         else:
             raise TypeError(
-                "defocalType must be a DefocalType Enum, or "
-                "one of the strings 'intra' or 'extra'."
+                "defocalType must be a DefocalType Enum, "
+                "or one of the corresponding strings."
             )
 
     @property
-    def filterLabel(self) -> FilterLabel:
-        """Return the FilterLabel Enum of the image.
+    def planeType(self) -> PlaneType:
+        """Return the PlaneType Enum of the stamp.
 
         For details about this parameter, see the class docstring.
         """
-        return self._filterLabel
+        return self._planeType
 
-    @filterLabel.setter
-    def filterLabel(self, value: Union[FilterLabel, str]) -> None:
-        if isinstance(value, str):
-            self._filterLabel = FilterLabel(value)
-        elif isinstance(value, FilterLabel):
-            self._filterLabel = value
+    @planeType.setter
+    def planeType(self, value: Union[PlaneType, str]) -> None:
+        if isinstance(value, str) or isinstance(value, PlaneType):
+            self._planeType = PlaneType(value)
         else:
             raise TypeError(
-                "filterLabel must be a FilterLabel Enum, or "
-                "one of the corresponding strings."
+                "planeType must be a PlaneType Enum, "
+                "or one of the corresponding strings."
+            )
+
+    @property
+    def bandLabel(self) -> BandLabel:
+        """Return the BandLabel Enum of the image.
+
+        For details about this parameter, see the class docstring.
+        """
+        return self._bandLabel
+
+    @bandLabel.setter
+    def bandLabel(self, value: Union[BandLabel, str]) -> None:
+        if isinstance(value, str) or isinstance(value, BandLabel):
+            self._bandLabel = BandLabel(value)
+        else:
+            raise TypeError(
+                "bandLabel must be a BandLabel Enum, "
+                "or one of the corresponding strings."
             )
 
     @property
@@ -135,6 +157,19 @@ class DonutStamp:
                 "where N is the number of blends you wish to mask."
             )
         self._blendOffsets = value
+
+    @property
+    def mask(self) -> Union[np.ndarray, None]:
+        """Return the image mask."""
+        return self._mask
+
+    @mask.setter
+    def mask(self, value: Optional[np.ndarray]) -> None:
+        if value is not None and not isinstance(value, np.ndarray):
+            raise TypeError("mask must be an array, or None.")
+        elif isinstance(value, np.ndarray) and value.shape != self.image.shape:
+            raise ValueError("mask must have the same shape as self.image.")
+        self._mask = value
 
     def copy(self) -> Self:
         """Return a copy of the DonutImage object.

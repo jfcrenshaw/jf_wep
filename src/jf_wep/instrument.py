@@ -1,9 +1,11 @@
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
+import batoid
 import numpy as np
 
-from jf_wep.utils import mergeParams
+from jf_wep.utils import BandLabel, DefocalType, mergeParams
 
 
 class Instrument:
@@ -28,6 +30,18 @@ class Instrument:
         The defocal offset of the images in meters.
     pixelSize : float, optional
         The pixel size in meters.
+    wavelength : float or dict, optional
+        The effective wavelength of the instrument in meters. Can be a float, or
+        a dictionary that corresponds to different bands. The keys in this
+        dictionary are expected to correspond to the strings specified in the
+        BandLabel enum in jf_wep.utils.enums.
+    batoidModelName : str, optional
+        The name used to load the Batoid model, via
+        batoid.Optic.fromYaml(batoidModelName). If the string contains "{band}",
+        then it is assumed there are different Batoid models for different
+        photometric bands, and the names of these bands will be filled in at
+        runtime using the strings specified in the BandLabel enum in
+        jf_wep.utils.enums.
     """
 
     def __init__(
@@ -39,6 +53,8 @@ class Instrument:
         focalLength: Optional[float] = None,
         defocalOffset: Optional[float] = None,
         pixelSize: Optional[float] = None,
+        wavelength: Union[float, dict, None] = None,
+        batoidModelName: Optional[str] = None,
     ) -> None:
         # Merge keyword arguments with defaults from configFile
         params = mergeParams(
@@ -49,6 +65,8 @@ class Instrument:
             focalLength=focalLength,
             defocalOffset=defocalOffset,
             pixelSize=pixelSize,
+            wavelength=wavelength,
+            batoidModelName=batoidModelName,
         )
 
         # Set each parameter
@@ -179,7 +197,7 @@ class Instrument:
         nPixels = np.ceil(self.donutDiameter).astype(int)
 
         # Create a 1D array with the correct number of pixels
-        grid = np.linspace(-1, 1, nPixels)
+        grid = np.linspace(-1.05, 1.05, nPixels)
 
         # Create u and v grids
         uPupil, vPupil = np.meshgrid(grid, grid)
@@ -220,6 +238,177 @@ class Instrument:
 
         return uImage, vImage
 
+    @property
+    def wavelength(self) -> Union[float, dict]:
+        """Return the effective wavelength(s) in meters."""
+        return self._wavelength
+
+    @wavelength.setter
+    def wavelength(self, value: Union[float, dict]) -> None:
+        if not isinstance(value, float) and not isinstance(value, dict):
+            raise TypeError("wavelength must be a float or a dictionary.")
+        if isinstance(value, dict):
+            # Convert the wavelength dictionary to use BandLabels and floats
+            value = {BandLabel(key): float(val) for key, val in value.items()}
+        self._wavelength = value
+
+    @property
+    def batoidModelName(self) -> str:
+        return self._batoidModelName
+
+    @batoidModelName.setter
+    def batoidModelName(self, value: str) -> None:
+        if not isinstance(value, str):
+            raise ValueError("batoidModelName must be a string.")
+        self._batoidModelName = value
+
+    def getBatoidModel(
+        self, band: Union[BandLabel, str] = BandLabel.REF
+    ) -> batoid.Optic:
+        """Return the batoid optical model for the instrument and the requested band.
+
+        Parameters
+        ----------
+        band : BandLabel or str, optional
+            The BandLabel Enum or corresponding string, specifying which batoid
+            model to load. Only relevant if self.batoidModelName contains "{band}".
+            (the default is BandLabel.REF)
+        """
+        # Get the band string from the Enum
+        band = BandLabel(band).value
+
+        # Fill any occurrence of "{band}" with the band string
+        batoidModelName = self.batoidModelName.format(band=band)
+
+        # Load the Batoid model
+        return batoid.Optic.fromYaml(batoidModelName)
+
+    @lru_cache
+    def getIntrinsicZernikes(
+        self,
+        xAngle: float,
+        yAngle: float,
+        band: Union[BandLabel, str] = BandLabel.REF,
+        jmax: int = 66,
+    ) -> np.ndarray:
+        """Return the intrinsic Zernikes associated with the optical design.
+
+        Parameters
+        ----------
+        xAngle : float
+            The x-component of the field angle in degrees.
+        yAngle : float
+            The y-component of the field angle in degrees.
+        band : BandLabel or str, optional
+            The BandLabel Enum or corresponding string, specifying which batoid
+            model to load. Only relevant if self.batoidModelName contains "{band}".
+            (the default is BandLabel.REF)
+        jmax : int, optional
+            The maximum Noll index of the intrinsic Zernikes.
+            (the default is 66)
+
+        Returns
+        -------
+        np.ndarray
+            The Zernike coefficients in meters, for Noll indices >= 4
+        """
+        # Get the band enum
+        band = BandLabel(band)
+
+        # Get the batoid model
+        batoidModel = self.getBatoidModel(band)
+
+        # Get the wavelength
+        if isinstance(self.wavelength, dict):
+            wavelength = self.wavelength[band]
+        else:
+            wavelength = self.wavelength
+
+        # Get the intrinsic Zernikes in wavelengths
+        zkIntrinsic = batoid.zernike(
+            batoidModel,
+            *np.deg2rad([xAngle, yAngle]),
+            wavelength,
+            jmax=jmax,
+            eps=batoidModel.pupilObscuration,
+        )
+
+        # Multiply by wavelength to get Zernikes in meters
+        zkIntrinsic *= wavelength
+
+        # Keep only Noll indices >= 4
+        zkIntrinsic = zkIntrinsic[4:]
+
+        return zkIntrinsic
+
+    @lru_cache
+    def getOffAxisCoeff(
+        self,
+        xAngle: float,
+        yAngle: float,
+        defocalType: DefocalType,
+        band: Union[BandLabel, str] = BandLabel.REF,
+        jmax: int = 66,
+    ) -> np.ndarray:
+        """Return the Zernike coefficients associated with the off-axis model.
+
+        Parameters
+        ----------
+        xAngle : float
+            The x-component of the field angle in degrees.
+        yAngle : float
+            The y-component of the field angle in degrees.
+        defocalType : DefocalType or str
+            The DefocalType Enum or corresponding string, specifying which side
+            of focus to model.
+        band : BandLabel or str, optional
+            The BandLabel Enum or corresponding string, specifying which batoid
+            model to load. Only relevant if self.batoidModelName contains "{band}".
+            (the default is BandLabel.REF)
+        jmax : int, optional
+            The maximum Noll index of the off-axis model Zernikes.
+            (the default is 66)
+
+        Returns
+        -------
+        np.ndarray
+            The Zernike coefficients in meters, for Noll indices >= 4
+        """
+        # Get the band enum
+        band = BandLabel(band)
+
+        # Get the batoid model
+        batoidModel = self.getBatoidModel(band)
+
+        # Offset the focal plane
+        defocalType = DefocalType(defocalType)
+        defocalSign = +1 if defocalType == DefocalType.Extra else -1
+        offset = defocalSign * self.defocalOffset
+        batoidModel = batoidModel.withGloballyShiftedOptic("Detector", [0, 0, offset])
+
+        # Get the wavelength
+        if isinstance(self.wavelength, dict):
+            wavelength = self.wavelength[band]
+        else:
+            wavelength = self.wavelength
+
+        # Get the off-axis model Zernikes in wavelengths
+        zkIntrinsic = batoid.zernikeTA(
+            batoidModel,
+            *np.deg2rad([xAngle, yAngle]),
+            wavelength,
+            jmax=jmax,
+            eps=batoidModel.pupilObscuration,
+        )
+
+        # Multiply by wavelength to get Zernikes in meters
+        zkIntrinsic *= wavelength
+
+        # Keep only Noll indices >= 4
+        zkIntrinsic = zkIntrinsic[4:]
+
+        return zkIntrinsic
+    
     @property
     def maskParams(self) -> dict:
         """Return the mask parameters."""

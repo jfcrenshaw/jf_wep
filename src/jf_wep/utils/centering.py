@@ -30,6 +30,9 @@ def centerWithTemplate(
     np.ndarray
         The centered image
     """
+    # Replace any NaNs with zeros, because the NaNs screw up the correlation
+    image = np.nan_to_num(image)
+
     # Correlate the template with the image
     corr = correlate(image, template, mode="same")
 
