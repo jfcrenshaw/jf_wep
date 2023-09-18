@@ -39,6 +39,15 @@ class ImageMapper:
         points to a config file, which is used to configure the Instrument.
         If a dictionary, it is assumed to hold keywords for configuration.
         If an Instrument object, that object is just used.
+    opticalModel : str, optional
+        The optical model to use for mapping between the image and pupil planes.
+        Can be either "onAxis" or "offAxis". It is recommended you use offAxis,
+        as this model can account for wide-field distortion effects, and so
+        is appropriate for a wider range of field angles. However, the offAxis
+        model requires a Batoid model of the telescope. If you do not have such
+        a model, you can use the onAxis model, which is analytic, but is only
+        appropriate near the optical axis. The field angle at which the onAxis
+        model breaks down is telescope dependent.
     """
 
     def __init__(
@@ -58,7 +67,7 @@ class ImageMapper:
         self.configInstrument(params["instConfig"])
 
         # Set the optical model
-        self.opticalModel = opticalModel  # type: ignore
+        self.opticalModel = params["opticalModel"]  # type: ignore
 
     def configInstrument(
         self, instConfig: Union[Instrument, Path, str, dict]

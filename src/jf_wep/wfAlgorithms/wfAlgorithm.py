@@ -57,7 +57,6 @@ class WfAlgorithm(ABC):
             A stamp object containing an intra- or extra-focal donut image.
         I2 : DonutStamp, optional
             A second stamp, on the opposite side of focus from I1.
-            (the default is None)
         jmax : int, optional
             The maximum Zernike Noll index to estimate.
             (the default is 28)
@@ -112,7 +111,6 @@ class WfAlgorithm(ABC):
             A stamp object containing an intra- or extra-focal donut image.
         I2 : DonutStamp, optional
             A second stamp, on the opposite side of focus from I1.
-            (the default is None)
         jmax : int, optional
             The maximum Zernike Noll index to estimate.
             (the default is 28)

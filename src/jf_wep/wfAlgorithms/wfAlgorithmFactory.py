@@ -1,9 +1,9 @@
 from pathlib import Path
 from typing import Union
 
+from jf_wep.utils import WfAlgorithmName, loadConfig
 from jf_wep.wfAlgorithms.tie import TIEAlgorithm
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
-from jf_wep.utils import WfAlgorithmName, loadConfig
 
 
 class WfAlgorithmFactory:

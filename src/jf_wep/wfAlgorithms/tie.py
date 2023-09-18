@@ -27,13 +27,15 @@ class TIEAlgorithm(WfAlgorithm):
         path starts with "policy/", it will look in the policy directory.
         Any explicitly passed parameters override values found in this file
         (the default is policy/wfAlgorithms/tie.yaml)
-    addIntrinsic : bool, optional
-        Whether to explicitly add the intrinsic Zernike coefficients to
-        those solved for by the TIE. If False, the coefficients returned
-        by the TIE represent the full OPD. If True, the coefficients
-        returned by the TIE represent the wavefront deviation
-        (i.e. OPD - intrinsic). If the donuts provided to the TIE are at
-        different field positions, it is best to set addIntrinsic=True.
+    opticalModel : str, optional
+        The optical model to use for mapping the images to the pupil plane.
+        Can be either "onAxis" or "offAxis". It is recommended you use offAxis,
+        as this model can account for wide-field distortion effects, and so
+        is appropriate for a wider range of field angles. However, the offAxis
+        model requires a Batoid model of the telescope. If you do not have such
+        a model, you can use the onAxis model, which is analytic, but is only
+        appropriate near the optical axis. The field angle at which the onAxis
+        model breaks down is telescope dependent.
     solver : str, optional
         Method used to solve the TIE. If "exp", the TIE is solved via
         directly expanding the wavefront in a Zernike series. If "fft",
@@ -60,7 +62,7 @@ class TIEAlgorithm(WfAlgorithm):
     def __init__(
         self,
         configFile: Union[Path, str, None] = "policy/wfAlgorithms/tie.yaml",
-        addIntrinsic: Optional[bool] = None,
+        opticalModel: Optional[str] = None,
         solver: Optional[str] = None,
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
@@ -70,7 +72,7 @@ class TIEAlgorithm(WfAlgorithm):
     ) -> None:
         super().__init__(
             configFile=configFile,
-            addIntrinsic=addIntrinsic,
+            opticalModel=opticalModel,
             solver=solver,
             maxIter=maxIter,
             compSequence=compSequence,
@@ -83,19 +85,17 @@ class TIEAlgorithm(WfAlgorithm):
         self._history = {}  # type: ignore
 
     @property
-    def addIntrinsic(self) -> bool:
-        """Flag indicating whether intrinsic Zernikes are explicitly added.
+    def opticalModel(self) -> str:
+        return self._opticalModel
 
-        For details about this parameter, see the class docstring.
-        """
-        return self._addIntrinsic
-
-    @addIntrinsic.setter
-    def addIntrinsic(self, value: bool) -> None:
-        """Set the addIntrinsic flag."""
-        if not isinstance(value, bool):
-            raise TypeError("addIntrinsic must be a bool.")
-        self._addIntrinsic = value
+    @opticalModel.setter
+    def opticalModel(self, value: str) -> None:
+        allowedModels = ["onAxis", "offAxis"]
+        if not isinstance(value, str) or value not in allowedModels:
+            raise TypeError(
+                f"opticalModel must be one of {str(allowedModels)[1:-1]}."
+            )
+        self._opticalModel = value
 
     @property
     def solver(self) -> Union[str, None]:
@@ -370,29 +370,23 @@ class TIEAlgorithm(WfAlgorithm):
             )
         self._validateInputs(I1, I2, jmax, instrument)
 
-        # Warn that addIntrinsic==False is a bad idea when the donuts are at
-        # different field angles
-        if (
-            not np.allclose(I1.fieldAngle, I2.fieldAngle)
-            and not self.addIntrinsic
-        ):
-            warnings.warn(
-                "When estimating Zernikes from a pair of donuts at different "
-                "field angles, it is wise to set self.addIntrinsic=True, "
-                "since telescopes have different intrinsic aberrations at "
-                "different field angles."
-            )
-
         # Create the ImageMapper for image compensation
         imageMapper = ImageMapper(
             configFile=None,
             instConfig=instrument,
-            addIntrinsic=self.addIntrinsic,
+            opticalModel=self.opticalModel,
         )
 
         # Get the initial intrafocal and extrafocal stamps
-        intra = I1 if I1.defocalType == DefocalType.Intra else I2
-        extra = I1 if I1.defocalType == DefocalType.Extra else I2
+        intra = I1.copy() if I1.defocalType == DefocalType.Intra else I2.copy()
+        extra = I1.copy() if I1.defocalType == DefocalType.Extra else I2.copy()
+
+        if self.saveHistory:
+            # Save the initial images in the history
+            self._history[0] = {
+                "intraInit": intra.image.copy(),
+                "extraInit": extra.image.copy(),
+            }
 
         # Create un-aberrated templates for both donuts
         intraTemplate = imageMapper.mapPupilToImage(intra)
@@ -401,6 +395,13 @@ class TIEAlgorithm(WfAlgorithm):
         # Center the donuts using these templates
         intra.image = centerWithTemplate(intra.image, intraTemplate.image)
         extra.image = centerWithTemplate(extra.image, extraTemplate.image)
+
+        if self.saveHistory:
+            # Save the templates and centered images
+            self._history[0]["intraTemplate"] = intraTemplate.image.copy()
+            self._history[0]["extraTemplate"] = extraTemplate.image.copy()
+            self._history[0]["intraCent"] = intra.image.copy()
+            self._history[0]["extraCent"] = extra.image.copy()
 
         # Initialize Zernike arrays at zero
         zkComp = np.zeros(jmax - 4 + 1)  # Zernikes for compensation
@@ -427,33 +428,42 @@ class TIEAlgorithm(WfAlgorithm):
             zkComp[(jmaxComp - 3) :] = 0
 
             # Compensate images using the Zernikes
-            intraComp = imageMapper.mapImageToPupil(intra, zkComp).image
-            extraComp = imageMapper.mapImageToPupil(extra, zkComp).image
+            intraComp = imageMapper.mapImageToPupil(intra, zkComp)
+            extraComp = imageMapper.mapImageToPupil(extra, zkComp)
+
+            # Apply a common mask to each
+            intraMask = intraComp.mask
+            extraMask = extraComp.mask
+            mask = (intraMask > 0.5) & (extraMask > 0.5)  # type: ignore
+            intraCompImg = intraComp.image * mask
+            extraCompImg = extraComp.image * mask
 
             # Check for caustics
             if (
-                intraComp.max() <= 0
-                or extraComp.max() <= 0
-                or not np.isfinite(intraComp).all()
-                or not np.isfinite(extraComp).all()
+                intraCompImg.max() <= 0
+                or extraCompImg.max() <= 0
+                or not np.isfinite(intraCompImg).all()
+                or not np.isfinite(extraCompImg).all()
             ):
                 caustic = True
 
                 # Dummy NaNs for the missing objects
-                I0 = np.full_like(intraComp, np.nan)
-                dIdz = np.full_like(intraComp, np.nan)
+                I0 = np.full_like(intraCompImg, np.nan)
+                dIdz = np.full_like(intraCompImg, np.nan)
                 zkResid = np.nan * zkResid
                 zkBest = np.nan * zkResid
 
             # If no caustic, proceed with Zernike estimation
             else:
                 # Normalize the images
-                intraComp /= intraComp.sum()
-                extraComp /= extraComp.sum()
+                intraCompImg /= intraCompImg.sum()  # type: ignore
+                extraCompImg /= extraCompImg.sum()  # type: ignore
 
                 # Approximate I0 = I(x, 0) and dI/dz = dI(x, z)/dz at z=0
-                I0 = (intraComp + extraComp) / 2
-                dIdz = (intraComp - extraComp) / (2 * instrument.pupilOffset)
+                I0 = (intraCompImg + extraCompImg) / 2  # type: ignore
+                dIdz = (intraCompImg - extraCompImg) / (  # type: ignore
+                    2 * instrument.pupilOffset
+                )
 
                 # Estimate the Zernikes
                 if self.solver == "exp":
@@ -480,11 +490,10 @@ class TIEAlgorithm(WfAlgorithm):
             # Should we save intermediate products in the algorithm history?
             if self.saveHistory:
                 # Save the images and Zernikes from this iteration
-                self._history[i] = {
-                    "intraCent": intra.copy(),
-                    "extraCent": extra.copy(),
-                    "intraComp": intraComp.copy(),
-                    "extraComp": extraComp.copy(),
+                self._history[i + 1] = {
+                    "intraComp": intraComp.image.copy(),
+                    "extraComp": extraComp.image.copy(),
+                    "mask": mask.copy(),  # type: ignore
                     "I0": I0.copy(),
                     "dIdz": dIdz.copy(),
                     "zkComp": zkComp.copy(),

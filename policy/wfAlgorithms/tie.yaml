@@ -1,6 +1,7 @@
 # Default parameters for the TIE algorithm
 
 addIntrinsic: True
+opticalModel: offAxis
 solver: exp
 maxIter: 20
 compSequence: [4, 4, 6, 6, 13, 13, 13, 13, 22, 22, 22, 22, 22, 22]

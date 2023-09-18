@@ -10,7 +10,7 @@ import numpy as np
 
 from jf_wep.donutStamp import DonutStamp
 from jf_wep.instrument import Instrument
-from jf_wep.utils import loadConfig, mergeParams, convertZernikesToPsfWidth
+from jf_wep.utils import convertZernikesToPsfWidth, loadConfig, mergeParams
 from jf_wep.wfAlgorithms.wfAlgorithm import WfAlgorithm
 from jf_wep.wfAlgorithms.wfAlgorithmFactory import WfAlgorithmFactory
 
