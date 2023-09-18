@@ -252,16 +252,26 @@ class Instrument:
             value = {BandLabel(key): float(val) for key, val in value.items()}
         self._wavelength = value
 
+        # Also clear the caches for the functions that use this value
+        self.getIntrinsicZernikes.cache_clear()
+        self.getOffAxisCoeff.cache_clear()
+
     @property
-    def batoidModelName(self) -> str:
+    def batoidModelName(self) -> Union[str, None]:
         return self._batoidModelName
 
     @batoidModelName.setter
-    def batoidModelName(self, value: str) -> None:
-        if not isinstance(value, str):
-            raise ValueError("batoidModelName must be a string.")
+    def batoidModelName(self, value: Optional[str]) -> None:
+        if not isinstance(value, str) and value is not None:
+            raise ValueError("batoidModelName must be a string, or None.")
         self._batoidModelName = value
 
+        # Also clear the caches for the functions that use this value
+        self.getBatoidModel.cache_clear()
+        self.getIntrinsicZernikes.cache_clear()
+        self.getOffAxisCoeff.cache_clear()
+
+    @lru_cache(10)
     def getBatoidModel(
         self, band: Union[BandLabel, str] = BandLabel.REF
     ) -> batoid.Optic:
@@ -274,6 +284,9 @@ class Instrument:
             model to load. Only relevant if self.batoidModelName contains "{band}".
             (the default is BandLabel.REF)
         """
+        if self.batoidModelName is None:
+            return None
+        
         # Get the band string from the Enum
         band = BandLabel(band).value
 
@@ -283,7 +296,7 @@ class Instrument:
         # Load the Batoid model
         return batoid.Optic.fromYaml(batoidModelName)
 
-    @lru_cache
+    @lru_cache(100)
     def getIntrinsicZernikes(
         self,
         xAngle: float,
@@ -318,6 +331,10 @@ class Instrument:
         # Get the batoid model
         batoidModel = self.getBatoidModel(band)
 
+        # If there is no batoid model, just return zeros
+        if batoidModel is None:
+            return np.zeros(jmax - 3)
+
         # Get the wavelength
         if isinstance(self.wavelength, dict):
             wavelength = self.wavelength[band]
@@ -341,7 +358,7 @@ class Instrument:
 
         return zkIntrinsic
 
-    @lru_cache
+    @lru_cache(100)
     def getOffAxisCoeff(
         self,
         xAngle: float,
@@ -379,6 +396,10 @@ class Instrument:
 
         # Get the batoid model
         batoidModel = self.getBatoidModel(band)
+
+        # If there is no batoid model, just return zeros
+        if batoidModel is None:
+            return np.zeros(jmax - 3)
 
         # Offset the focal plane
         defocalType = DefocalType(defocalType)
