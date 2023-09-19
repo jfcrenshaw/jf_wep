@@ -10,7 +10,6 @@ from jf_wep.imageMapper import ImageMapper
 from jf_wep.instrument import Instrument
 from jf_wep.utils import (
     DefocalType,
-    centerWithTemplate,
     createZernikeBasis,
     createZernikeGradBasis,
 )
@@ -50,6 +49,12 @@ class TIEAlgorithm(WfAlgorithm):
         been reached, all Zernike coefficients are used during compensation.
     compGain : float, optional
         The gain used to update the Zernikes for image compensation.
+    centerBinary : bool, optional
+        Whether to use a binary template when centering the image. Using a binary
+        template is typically less accurate, but faster.
+    centerSubPixel : bool, optional
+        Whether to center the images with sub-pixel resolution. Sub-pixel
+        resolution is typically more accurate, but slower.
     convergeTol : float, optional
         The mean absolute deviation, in meters, between the Zernike estimates
         of subsequent TIE iterations below which convergence is declared.
@@ -67,6 +72,8 @@ class TIEAlgorithm(WfAlgorithm):
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
         compGain: Optional[float] = None,
+        centerBinary: Optional[bool] = None,
+        centerSubPixel: Optional[bool] = None,
         convergeTol: Optional[float] = None,
         saveHistory: Optional[bool] = None,
     ) -> None:
@@ -77,6 +84,8 @@ class TIEAlgorithm(WfAlgorithm):
             maxIter=maxIter,
             compSequence=compSequence,
             compGain=compGain,
+            centerBinary=centerBinary,
+            centerSubPixel=centerSubPixel,
             convergeTol=convergeTol,
             saveHistory=saveHistory,
         )
@@ -166,6 +175,26 @@ class TIEAlgorithm(WfAlgorithm):
         if value <= 0:
             raise ValueError("compGain must be positive.")
         self._compGain = value
+
+    @property
+    def centerBinary(self) -> bool:
+        return self._centerBinary
+
+    @centerBinary.setter
+    def centerBinary(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("centerBinary must be a boolean.")
+        self._centerBinary = value
+
+    @property
+    def centerSubPixel(self) -> bool:
+        return self._centerSubPixel
+
+    @centerSubPixel.setter
+    def centerSubPixel(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("centerSubPixel must be a boolean.")
+        self._centerSubPixel = value
 
     @property
     def convergeTol(self) -> float:
@@ -370,7 +399,7 @@ class TIEAlgorithm(WfAlgorithm):
             )
         self._validateInputs(I1, I2, jmax, instrument)
 
-        # Create the ImageMapper for image compensation
+        # Create the ImageMapper for centering and image compensation
         imageMapper = ImageMapper(
             configFile=None,
             instConfig=instrument,
@@ -387,21 +416,6 @@ class TIEAlgorithm(WfAlgorithm):
                 "intraInit": intra.image.copy(),
                 "extraInit": extra.image.copy(),
             }
-
-        # Create un-aberrated templates for both donuts
-        intraTemplate = imageMapper.mapPupilToImage(intra)
-        extraTemplate = imageMapper.mapPupilToImage(extra)
-
-        # Center the donuts using these templates
-        intra.image = centerWithTemplate(intra.image, intraTemplate.image)
-        extra.image = centerWithTemplate(extra.image, extraTemplate.image)
-
-        if self.saveHistory:
-            # Save the templates and centered images
-            self._history[0]["intraTemplate"] = intraTemplate.image.copy()
-            self._history[0]["extraTemplate"] = extraTemplate.image.copy()
-            self._history[0]["intraCent"] = intra.image.copy()
-            self._history[0]["extraCent"] = extra.image.copy()
 
         # Initialize Zernike arrays at zero
         zkComp = np.zeros(jmax - 4 + 1)  # Zernikes for compensation
@@ -427,41 +441,55 @@ class TIEAlgorithm(WfAlgorithm):
             zkComp += self.compGain * zkResid
             zkComp[(jmaxComp - 3) :] = 0
 
+            # Center the images
+            intraCent = imageMapper.centerOnProjection(
+                intra,
+                zkComp,
+                binary=self.centerBinary,
+                subPixel=self.centerSubPixel,
+            )
+            extraCent = imageMapper.centerOnProjection(
+                extra,
+                zkComp,
+                binary=self.centerBinary,
+                subPixel=self.centerSubPixel,
+            )
+
             # Compensate images using the Zernikes
-            intraComp = imageMapper.mapImageToPupil(intra, zkComp)
-            extraComp = imageMapper.mapImageToPupil(extra, zkComp)
+            intraComp = imageMapper.mapImageToPupil(intraCent, zkComp)
+            extraComp = imageMapper.mapImageToPupil(extraCent, zkComp)
 
             # Apply a common mask to each
             intraMask = intraComp.mask
             extraMask = extraComp.mask
             mask = (intraMask > 0.5) & (extraMask > 0.5)  # type: ignore
-            intraCompImg = intraComp.image * mask
-            extraCompImg = extraComp.image * mask
+            intraComp.image *= mask
+            extraComp.image *= mask
 
             # Check for caustics
             if (
-                intraCompImg.max() <= 0
-                or extraCompImg.max() <= 0
-                or not np.isfinite(intraCompImg).all()
-                or not np.isfinite(extraCompImg).all()
+                intraComp.image.max() <= 0
+                or extraComp.image.max() <= 0
+                or not np.isfinite(intraComp.image).all()
+                or not np.isfinite(extraComp.image).all()
             ):
                 caustic = True
 
                 # Dummy NaNs for the missing objects
-                I0 = np.full_like(intraCompImg, np.nan)
-                dIdz = np.full_like(intraCompImg, np.nan)
+                I0 = np.full_like(intraComp.image, np.nan)
+                dIdz = np.full_like(intraComp.image, np.nan)
                 zkResid = np.nan * zkResid
                 zkBest = np.nan * zkResid
 
             # If no caustic, proceed with Zernike estimation
             else:
                 # Normalize the images
-                intraCompImg /= intraCompImg.sum()  # type: ignore
-                extraCompImg /= extraCompImg.sum()  # type: ignore
+                intraComp.image /= intraComp.image.sum()  # type: ignore
+                extraComp.image /= extraComp.image.sum()  # type: ignore
 
                 # Approximate I0 = I(x, 0) and dI/dz = dI(x, z)/dz at z=0
-                I0 = (intraCompImg + extraCompImg) / 2  # type: ignore
-                dIdz = (intraCompImg - extraCompImg) / (  # type: ignore
+                I0 = (intraComp.image + extraComp.image) / 2  # type: ignore
+                dIdz = (intraComp.image - extraComp.image) / (  # type: ignore
                     2 * instrument.pupilOffset
                 )
 
@@ -491,6 +519,8 @@ class TIEAlgorithm(WfAlgorithm):
             if self.saveHistory:
                 # Save the images and Zernikes from this iteration
                 self._history[i + 1] = {
+                    "intraCent": intraCent.image.copy(),
+                    "extraCent": extraCent.image.copy(),
                     "intraComp": intraComp.image.copy(),
                     "extraComp": extraComp.image.copy(),
                     "mask": mask.copy(),  # type: ignore

@@ -241,7 +241,7 @@ class ImageMapper:
             rPupil = np.sqrt(uPupil**2 + vPupil**2)
             with np.errstate(invalid="ignore"):
                 F = -defocalSign / np.sqrt(4 * N**2 - rPupil**2)
-            C = - 2 * N / l
+            C = -2 * N / l
 
             # Map the pupil points onto the image plane
             uImage = prefactor * (F * uPupil + C * (d1Wdu - d1Wdu0))
@@ -423,12 +423,12 @@ class ImageMapper:
         self,
         zkCoeff: np.ndarray,
         donutStamp: DonutStamp,
+        cornerIn: bool = True,
+        radius: float = 1.0,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return the image grid and a mask for which pixels are inside the pupil.
 
-        Note a pixel is considered inside the pupil if any fraction of the pixel
-        is inside the pupil. In addition, the pupil considered is the pupil
-        mapped to the image plane.
+        Note the pupil considered is the pupil mapped to the image plane.
 
         Parameters
         ----------
@@ -437,6 +437,12 @@ class ImageMapper:
             in meters for Noll indices >= 4.
         donutStamp : DonutStamp
             A stamp object containing the metadata required for the mapping.
+        cornerIn : bool, optional
+            Whether to consider a pixel inside the pupil if one of its corners
+            is inside the pupil. If False, the center is used to determine if
+            the pixel is inside. (the default is True)
+        radius : float, optional
+            The radius of the pupil. (the default is 1)
 
         Returns
         -------
@@ -449,7 +455,7 @@ class ImageMapper:
         """
         # Map pupil edge to the image to determine edge of pupil on the image
         theta = np.linspace(0, 2 * np.pi, 100)
-        uPupil, vPupil = np.cos(theta), np.sin(theta)
+        uPupil, vPupil = radius * np.cos(theta), radius * np.sin(theta)
         uImageEdge, vImageEdge, *_ = self._constructForwardMap(
             uPupil,
             vPupil,
@@ -462,18 +468,24 @@ class ImageMapper:
         nPixels = donutStamp.image.shape[0]
         uImage, vImage = self.instrument.createImageGrid(nPixels)
 
-        # Determine which image pixels have corners inside the pupil
-        dPixel = uImage[0, 1] - uImage[0, 0]
-        corners = np.append(uImage[0] - dPixel / 2, uImage[0, -1] + dPixel / 2)
-        cornersIn = polygonContains(*np.meshgrid(corners, corners), imageEdge)
+        if cornerIn:
+            # Determine which image pixels have corners inside the pupil
+            dPixel = uImage[0, 1] - uImage[0, 0]
+            corners = np.append(
+                uImage[0] - dPixel / 2, uImage[0, -1] + dPixel / 2
+            )
+            inside = polygonContains(*np.meshgrid(corners, corners), imageEdge)
 
-        # Select pixels that have at least one corner inside
-        inside = (
-            cornersIn[:-1, :-1]
-            | cornersIn[1:, :-1]
-            | cornersIn[:-1, 1:]
-            | cornersIn[1:, 1:]
-        )
+            # Select pixels that have at least one corner inside
+            inside = (
+                inside[:-1, :-1]
+                | inside[1:, :-1]
+                | inside[:-1, 1:]
+                | inside[1:, 1:]
+            )
+        else:
+            # Determine which image pixels have centers inside the pupil
+            inside = polygonContains(uImage, vImage, imageEdge)
 
         return uImage, vImage, inside
 
@@ -646,7 +658,6 @@ class ImageMapper:
         uPupil: np.ndarray,
         vPupil: np.ndarray,
         fwdMap: Optional[tuple] = None,
-        binary: bool = False,
     ) -> np.ndarray:
         """Loop through mask elements to create the mask.
 
@@ -663,9 +674,6 @@ class ImageMapper:
             the output of self._constructForwardMap(uPupil, vPupil, ...)
             If not None, the mask is mapped to the image plane.
             (the default is None)
-        binary : bool, optional
-            Whether to return a binary mask. If False, a fractional mask is returned
-            instead. (the default is False)
 
         Returns
         -------
@@ -732,9 +740,6 @@ class ImageMapper:
             else:
                 mask[idx] = np.minimum(mask[idx], maskVals)
 
-        if binary:
-            mask = mask >= 0.5
-
         return mask
 
     def createPupilMask(
@@ -761,13 +766,18 @@ class ImageMapper:
         # Get the pupil grid
         uPupil, vPupil = self.instrument.createPupilGrid()
 
+        if binary:
+            # If we want a binary mask, just return the pixels whose centers
+            # are inside the pupil
+            rPupil = np.sqrt(uPupil**2 + vPupil**2)
+            return (rPupil >= self.instrument.obscuration) & (rPupil <= 1)
+
         # Get the mask by looping over the mask elements
         mask = self._maskLoop(
             donutStamp=donutStamp,
             uPupil=uPupil,
             vPupil=vPupil,
             fwdMap=None,
-            binary=binary,
         )
 
         # Restore the mask shape
@@ -840,10 +850,54 @@ class ImageMapper:
             uPupil=uPupil,
             vPupil=vPupil,
             fwdMap=fwdMap,
-            binary=binary,
         )
 
+        if binary:
+            mask = mask > 0.5
+
         return mask
+
+    def centerOnProjection(
+        self,
+        donutStamp: DonutStamp,
+        zkCoeff: np.ndarray = np.zeros(1),
+        binary: bool = True,
+        subPixel: bool = True,
+        rMax: float = 10,
+    ) -> DonutStamp:
+        """Center the stamp on a projection of the pupil.
+
+        Parameters
+        ----------
+        donutStamp : DonutStamp
+            A stamp object containing the metadata needed for the mapping.
+        zkCoeff : np.ndarray, optional
+            The wavefront deviation at the pupil, represented as Zernike coefficients
+            in meters, for Noll indices >= 4. (the default is zero)
+        binary : bool, optional
+            If True, a binary mask is used to estimate the center of the image,
+            otherwise a forward model of the image is used. The latter will
+            likely result in a more accurate center, but takes longer to
+            calculate. (the default is True)
+        subPixel : bool, optional
+            Whether to center with sub-pixel resolution. (the default is True)
+        rMax : float, optional
+            The maximum pixel distance the image can be shifted.
+            (the default is 10)
+        """
+        # Make a copy of the stamp
+        stamp = donutStamp.copy()
+
+        # Create the image template
+        if binary:
+            template = self.createImageMask(stamp, zkCoeff, binary=True)
+        else:
+            template = self.mapPupilToImage(stamp, zkCoeff).image
+
+        # Center the image
+        stamp.image = centerWithTemplate(stamp.image, template, subPixel, rMax)
+
+        return stamp
 
     def mapPupilToImage(
         self,
@@ -859,8 +913,8 @@ class ImageMapper:
             It is assumed that mapping the pupil to the image plane is meant
             to model the image contained in this stamp.
         zkCoeff : np.ndarray, optional
-            The wavefront at the pupil, represented as Zernike coefficients
-            in meters, for Noll indices >= 4.
+            The wavefront deviation at the pupil, represented as Zernike coefficients
+            in meters, for Noll indices >= 4. (the default is zero)
 
         Returns
         -------
@@ -929,9 +983,6 @@ class ImageMapper:
         # Create regular pupil and image grids
         uPupil, vPupil = self.instrument.createPupilGrid()
         uImage, vImage = self.instrument.createImageGrid(stamp.image.shape[0])
-
-        template = self.createImageMask(stamp, zkCoeff, binary=True)
-        stamp.image = centerWithTemplate(stamp.image, template)
 
         # Construct the forward mapping
         uImageMap, vImageMap, jac, jacDet = self._constructForwardMap(
