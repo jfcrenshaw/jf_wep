@@ -49,6 +49,10 @@ class TIEAlgorithm(WfAlgorithm):
         been reached, all Zernike coefficients are used during compensation.
     compGain : float, optional
         The gain used to update the Zernikes for image compensation.
+    centerTol : float, optional
+        The maximum absolute change in any Zernike amplitude (in meters) for which
+        the images need to be recentered. A smaller value causes the images to
+        be recentered more often. If 0, images are recentered on every iteration.
     centerBinary : bool, optional
         Whether to use a binary template when centering the image. Using a binary
         template is typically less accurate, but faster.
@@ -56,8 +60,9 @@ class TIEAlgorithm(WfAlgorithm):
         Whether to center the images with sub-pixel resolution. Sub-pixel
         resolution is typically more accurate, but slower.
     convergeTol : float, optional
-        The mean absolute deviation, in meters, between the Zernike estimates
-        of subsequent TIE iterations below which convergence is declared.
+        The maximum absolute change in any Zernike amplitude (in meters) between
+        subsequent TIE iterations below which convergence is declared and iteration
+        is stopped.
     saveHistory : bool, optional
         Whether to save the algorithm history in the self.history attribute.
         If True, then self.history contains information about the most recent
@@ -72,6 +77,7 @@ class TIEAlgorithm(WfAlgorithm):
         maxIter: Optional[int] = None,
         compSequence: Optional[Iterable] = None,
         compGain: Optional[float] = None,
+        centerTol: Optional[float] = None,
         centerBinary: Optional[bool] = None,
         centerSubPixel: Optional[bool] = None,
         convergeTol: Optional[float] = None,
@@ -84,6 +90,7 @@ class TIEAlgorithm(WfAlgorithm):
             maxIter=maxIter,
             compSequence=compSequence,
             compGain=compGain,
+            centerTol=centerTol,
             centerBinary=centerBinary,
             centerSubPixel=centerSubPixel,
             convergeTol=convergeTol,
@@ -175,6 +182,14 @@ class TIEAlgorithm(WfAlgorithm):
         if value <= 0:
             raise ValueError("compGain must be positive.")
         self._compGain = value
+
+    @property
+    def centerTol(self) -> float:
+        return self._centerTol
+
+    @centerTol.setter
+    def centerTol(self, value: float) -> None:
+        self._centerTol = float(value)
 
     @property
     def centerBinary(self) -> bool:
@@ -419,6 +434,7 @@ class TIEAlgorithm(WfAlgorithm):
 
         # Initialize Zernike arrays at zero
         zkComp = np.zeros(jmax - 4 + 1)  # Zernikes for compensation
+        zkCenter = np.zeros_like(zkComp)  # Zernikes for centering the image
         zkResid = np.zeros_like(zkComp)  # Residual Zernikes after compensation
         zkBest = np.zeros_like(zkComp)  # Current best Zernike estimate
 
@@ -442,18 +458,24 @@ class TIEAlgorithm(WfAlgorithm):
             zkComp[(jmaxComp - 3) :] = 0
 
             # Center the images
-            intraCent = imageMapper.centerOnProjection(
-                intra,
-                zkComp,
-                binary=self.centerBinary,
-                subPixel=self.centerSubPixel,
+            recenter = (i == 0) or (
+                np.max(np.abs(zkComp - zkCenter)) > self.centerTol
             )
-            extraCent = imageMapper.centerOnProjection(
-                extra,
-                zkComp,
-                binary=self.centerBinary,
-                subPixel=self.centerSubPixel,
-            )
+            if recenter:
+                # Zernikes have changed enough that we should recenter the images
+                zkCenter = zkComp.copy()
+                intraCent = imageMapper.centerOnProjection(
+                    intra,
+                    zkCenter,
+                    binary=self.centerBinary,
+                    subPixel=self.centerSubPixel,
+                )
+                extraCent = imageMapper.centerOnProjection(
+                    extra,
+                    zkCenter,
+                    binary=self.centerBinary,
+                    subPixel=self.centerSubPixel,
+                )
 
             # Compensate images using the Zernikes
             intraComp = imageMapper.mapImageToPupil(intraCent, zkComp)
@@ -462,7 +484,7 @@ class TIEAlgorithm(WfAlgorithm):
             # Apply a common mask to each
             intraMask = intraComp.mask
             extraMask = extraComp.mask
-            mask = (intraMask > 0.5) & (extraMask > 0.5)  # type: ignore
+            mask = (intraMask > 0) & (extraMask > 0)  # type: ignore
             intraComp.image *= mask
             extraComp.image *= mask
 
@@ -479,7 +501,6 @@ class TIEAlgorithm(WfAlgorithm):
                 I0 = np.full_like(intraComp.image, np.nan)
                 dIdz = np.full_like(intraComp.image, np.nan)
                 zkResid = np.nan * zkResid
-                zkBest = np.nan * zkResid
 
             # If no caustic, proceed with Zernike estimation
             else:
@@ -504,12 +525,9 @@ class TIEAlgorithm(WfAlgorithm):
                 # must be below self.convergeTol
                 # (2) We must be compensating all the Zernikes
                 newBest = zkComp + zkResid
-                diffZk = zkBest - newBest
-                if (
-                    np.mean(np.abs(diffZk)) < self.convergeTol
-                    and jmaxComp >= jmax
-                ):
-                    converged = True
+                converged = (jmaxComp >= jmax) & (
+                    np.max(np.abs(newBest - zkBest)) < self.convergeTol
+                )
 
                 # Set the new best estimate
                 zkBest = newBest
@@ -519,6 +537,7 @@ class TIEAlgorithm(WfAlgorithm):
             if self.saveHistory:
                 # Save the images and Zernikes from this iteration
                 self._history[i + 1] = {
+                    "recenter": recenter,
                     "intraCent": intraCent.image.copy(),
                     "extraCent": extraCent.image.copy(),
                     "intraComp": intraComp.image.copy(),

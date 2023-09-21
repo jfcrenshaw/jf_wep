@@ -197,7 +197,7 @@ class Instrument:
         nPixels = np.ceil(self.donutDiameter).astype(int)
 
         # Create a 1D array with the correct number of pixels
-        grid = np.linspace(-1.05, 1.05, nPixels)
+        grid = np.linspace(-1.01, 1.01, nPixels)
 
         # Create u and v grids
         uPupil, vPupil = np.meshgrid(grid, grid)
@@ -253,8 +253,8 @@ class Instrument:
         self._wavelength = value
 
         # Also clear the caches for the functions that use this value
-        self.getIntrinsicZernikes.cache_clear()
-        self.getOffAxisCoeff.cache_clear()
+        self._getIntrinsicZernikesCached.cache_clear()
+        self._getOffAxisCoeffCached.cache_clear()
 
     @property
     def batoidModelName(self) -> Union[str, None]:
@@ -268,8 +268,8 @@ class Instrument:
 
         # Also clear the caches for the functions that use this value
         self.getBatoidModel.cache_clear()
-        self.getIntrinsicZernikes.cache_clear()
-        self.getOffAxisCoeff.cache_clear()
+        self._getIntrinsicZernikesCached.cache_clear()
+        self._getOffAxisCoeffCached.cache_clear()
 
     @lru_cache(10)
     def getBatoidModel(
@@ -297,14 +297,14 @@ class Instrument:
         return batoid.Optic.fromYaml(batoidModelName)
 
     @lru_cache(100)
-    def getIntrinsicZernikes(
+    def _getIntrinsicZernikesCached(
         self,
         xAngle: float,
         yAngle: float,
         band: Union[BandLabel, str] = BandLabel.REF,
         jmax: int = 66,
     ) -> np.ndarray:
-        """Return the intrinsic Zernikes associated with the optical design.
+        """Cached interior function for the getIntrinsicZernikes method.
 
         Parameters
         ----------
@@ -356,10 +356,42 @@ class Instrument:
         # Keep only Noll indices >= 4
         zkIntrinsic = zkIntrinsic[4:]
 
-        return zkIntrinsic
+        return zkIntrinsic.copy()
+
+    def getIntrinsicZernikes(
+        self,
+        xAngle: float,
+        yAngle: float,
+        band: Union[BandLabel, str] = BandLabel.REF,
+        jmax: int = 66,
+    ) -> np.ndarray:
+        """Return the intrinsic Zernikes associated with the optical design.
+
+        Parameters
+        ----------
+        xAngle : float
+            The x-component of the field angle in degrees.
+        yAngle : float
+            The y-component of the field angle in degrees.
+        band : BandLabel or str, optional
+            The BandLabel Enum or corresponding string, specifying which batoid
+            model to load. Only relevant if self.batoidModelName contains "{band}".
+            (the default is BandLabel.REF)
+        jmax : int, optional
+            The maximum Noll index of the intrinsic Zernikes.
+            (the default is 66)
+
+        Returns
+        -------
+        np.ndarray
+            The Zernike coefficients in meters, for Noll indices >= 4
+        """
+        return self._getIntrinsicZernikesCached(
+            xAngle, yAngle, band, jmax
+        ).copy()
 
     @lru_cache(100)
-    def getOffAxisCoeff(
+    def _getOffAxisCoeffCached(
         self,
         xAngle: float,
         yAngle: float,
@@ -367,7 +399,7 @@ class Instrument:
         band: Union[BandLabel, str] = BandLabel.REF,
         jmax: int = 66,
     ) -> np.ndarray:
-        """Return the Zernike coefficients associated with the off-axis model.
+        """Cached interior function for the getOffAxisCoeff method.
 
         Parameters
         ----------
@@ -431,6 +463,42 @@ class Instrument:
         zkIntrinsic = zkIntrinsic[4:]
 
         return zkIntrinsic
+
+    def getOffAxisCoeff(
+        self,
+        xAngle: float,
+        yAngle: float,
+        defocalType: DefocalType,
+        band: Union[BandLabel, str] = BandLabel.REF,
+        jmax: int = 66,
+    ) -> np.ndarray:
+        """Return the Zernike coefficients associated with the off-axis model.
+
+        Parameters
+        ----------
+        xAngle : float
+            The x-component of the field angle in degrees.
+        yAngle : float
+            The y-component of the field angle in degrees.
+        defocalType : DefocalType or str
+            The DefocalType Enum or corresponding string, specifying which side
+            of focus to model.
+        band : BandLabel or str, optional
+            The BandLabel Enum or corresponding string, specifying which batoid
+            model to load. Only relevant if self.batoidModelName contains "{band}".
+            (the default is BandLabel.REF)
+        jmax : int, optional
+            The maximum Noll index of the off-axis model Zernikes.
+            (the default is 66)
+
+        Returns
+        -------
+        np.ndarray
+            The Zernike coefficients in meters, for Noll indices >= 4
+        """
+        return self._getOffAxisCoeffCached(
+            xAngle, yAngle, defocalType, band, jmax
+        ).copy()
 
     @property
     def maskParams(self) -> dict:

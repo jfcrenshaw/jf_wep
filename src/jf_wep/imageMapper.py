@@ -133,12 +133,12 @@ class ImageMapper:
         """
         # Get the reference Zernikes
         if self.opticalModel == "onAxis":
-            zkRef = self.instrument.getIntrinsicZernikes(
+            zkRef = self.instrument.getIntrinsicZernikes(  # type: ignore
                 *donutStamp.fieldAngle,
                 donutStamp.bandLabel,
             )
         else:
-            zkRef = self.instrument.getOffAxisCoeff(
+            zkRef = self.instrument.getOffAxisCoeff(  # type: ignore
                 *donutStamp.fieldAngle,
                 donutStamp.defocalType,
                 donutStamp.bandLabel,
@@ -235,23 +235,33 @@ class ImageMapper:
             )
 
             # Calculate the prefactor
-            prefactor = np.sqrt(4 * N**2 - 1)
-
-            # Calculate the factors F and C
             rPupil = np.sqrt(uPupil**2 + vPupil**2)
             with np.errstate(invalid="ignore"):
-                F = -defocalSign / np.sqrt(4 * N**2 - rPupil**2)
-            C = -2 * N / l
+                prefactor = np.sqrt((4 * N**2 - 1) / (4 * N**2 - rPupil**2))
 
             # Map the pupil points onto the image plane
-            uImage = prefactor * (F * uPupil + C * (d1Wdu - d1Wdu0))
-            vImage = prefactor * (F * vPupil + C * (d1Wdv - d1Wdv0))
+            uImage = prefactor * (
+                -defocalSign * uPupil - 4 * N**2 / l * (d1Wdu - d1Wdu0)
+            )
+            vImage = prefactor * (
+                -defocalSign * vPupil - 4 * N**2 / l * (d1Wdv - d1Wdv0)
+            )
 
-            # Calculate the elements of the Jacobian
-            J00 = prefactor * (F + F**3 * uPupil**2 + C * d2Wdudu)
-            J01 = prefactor * (F**3 * uPupil * vPupil + C * d2Wdvdu)
-            J10 = prefactor * (F**3 * vPupil * uPupil + C * d2Wdudv)
-            J11 = prefactor * (F + F**3 * vPupil**2 + C * d2Wdvdv)
+            # Calculate the Jacobian
+            J00 = uPupil * uImage / (4 * N**2 - rPupil**2) - prefactor * (
+                defocalSign + 4 * N**2 / l * d2Wdudu
+            )
+            J01 = (
+                vPupil * uImage / (4 * N**2 - rPupil**2)
+                - prefactor * 4 * N**2 / l * d2Wdvdu
+            )
+            J10 = (
+                uPupil * vImage / (4 * N**2 - rPupil**2)
+                - prefactor * 4 * N**2 / l * d2Wdudv
+            )
+            J11 = vPupil * vImage / (4 * N**2 - rPupil**2) - prefactor * (
+                defocalSign + 4 * N**2 / l * d2Wdvdv
+            )
 
         else:
             # The offAxis model uses a numerically-fit model from batoid
@@ -423,8 +433,6 @@ class ImageMapper:
         self,
         zkCoeff: np.ndarray,
         donutStamp: DonutStamp,
-        cornerIn: bool = True,
-        radius: float = 1.0,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return the image grid and a mask for which pixels are inside the pupil.
 
@@ -437,12 +445,6 @@ class ImageMapper:
             in meters for Noll indices >= 4.
         donutStamp : DonutStamp
             A stamp object containing the metadata required for the mapping.
-        cornerIn : bool, optional
-            Whether to consider a pixel inside the pupil if one of its corners
-            is inside the pupil. If False, the center is used to determine if
-            the pixel is inside. (the default is True)
-        radius : float, optional
-            The radius of the pupil. (the default is 1)
 
         Returns
         -------
@@ -455,7 +457,7 @@ class ImageMapper:
         """
         # Map pupil edge to the image to determine edge of pupil on the image
         theta = np.linspace(0, 2 * np.pi, 100)
-        uPupil, vPupil = radius * np.cos(theta), radius * np.sin(theta)
+        uPupil, vPupil = np.cos(theta), np.sin(theta)
         uImageEdge, vImageEdge, *_ = self._constructForwardMap(
             uPupil,
             vPupil,
@@ -468,24 +470,18 @@ class ImageMapper:
         nPixels = donutStamp.image.shape[0]
         uImage, vImage = self.instrument.createImageGrid(nPixels)
 
-        if cornerIn:
-            # Determine which image pixels have corners inside the pupil
-            dPixel = uImage[0, 1] - uImage[0, 0]
-            corners = np.append(
-                uImage[0] - dPixel / 2, uImage[0, -1] + dPixel / 2
-            )
-            inside = polygonContains(*np.meshgrid(corners, corners), imageEdge)
+        # Determine which image pixels have corners inside the pupil
+        dPixel = uImage[0, 1] - uImage[0, 0]
+        corners = np.append(uImage[0] - dPixel / 2, uImage[0, -1] + dPixel / 2)
+        inside = polygonContains(*np.meshgrid(corners, corners), imageEdge)
 
-            # Select pixels that have at least one corner inside
-            inside = (
-                inside[:-1, :-1]
-                | inside[1:, :-1]
-                | inside[:-1, 1:]
-                | inside[1:, 1:]
-            )
-        else:
-            # Determine which image pixels have centers inside the pupil
-            inside = polygonContains(uImage, vImage, imageEdge)
+        # Select pixels that have at least one corner inside
+        inside = (
+            inside[:-1, :-1]
+            | inside[1:, :-1]
+            | inside[:-1, 1:]
+            | inside[1:, 1:]
+        )
 
         return uImage, vImage, inside
 
@@ -684,7 +680,7 @@ class ImageMapper:
         angle = donutStamp.fieldAngle
 
         # Get the angle radius
-        rTheta = np.clip(np.sqrt(np.sum(np.square(angle))), 1e-16, None)
+        rTheta = np.sqrt(np.sum(np.square(angle)))
 
         # Flatten the pupil arrays
         uPupil, vPupil = uPupil.ravel(), vPupil.ravel()
@@ -719,8 +715,8 @@ class ImageMapper:
             radius = np.polyval(val["radius"], rTheta)
             rCenter = np.polyval(val["center"], rTheta)
 
-            uCenter = rCenter * angle[0] / rTheta
-            vCenter = rCenter * angle[1] / rTheta
+            uCenter = 0 if rTheta == 0 else rCenter * angle[0] / rTheta
+            vCenter = 0 if rTheta == 0 else rCenter * angle[1] / rTheta
 
             # Calculate the mask values
             maskVals = self._maskWithCircle(
@@ -766,12 +762,6 @@ class ImageMapper:
         # Get the pupil grid
         uPupil, vPupil = self.instrument.createPupilGrid()
 
-        if binary:
-            # If we want a binary mask, just return the pixels whose centers
-            # are inside the pupil
-            rPupil = np.sqrt(uPupil**2 + vPupil**2)
-            return (rPupil >= self.instrument.obscuration) & (rPupil <= 1)
-
         # Get the mask by looping over the mask elements
         mask = self._maskLoop(
             donutStamp=donutStamp,
@@ -782,6 +772,9 @@ class ImageMapper:
 
         # Restore the mask shape
         mask = mask.reshape(uPupil.shape)
+
+        if binary:
+            mask = mask > 0.5
 
         return mask
 
@@ -1006,7 +999,7 @@ class ImageMapper:
         pupil = np.nan_to_num(pupil)
 
         # Mask the pupil
-        mask = self.createPupilMask(stamp, binary=True)
+        mask = self.createPupilMask(stamp)
         pupil *= mask
 
         # Update the stamp with the new pupil image

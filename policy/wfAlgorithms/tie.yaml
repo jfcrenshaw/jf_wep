@@ -5,7 +5,8 @@ solver: exp
 maxIter: 20
 compSequence: [4, 4, 6, 6, 13, 13, 13, 13, 22, 22, 22, 22, 22, 22]
 compGain: 0.6
-centerBinary: True
-centerSubPixel: True
-convergeTol: 1.0e-9
+centerTol: 10.0e-9
+centerBinary: False
+centerSubPixel: False
+convergeTol: 10.0e-9
 saveHistory: False
