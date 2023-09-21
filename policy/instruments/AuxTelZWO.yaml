@@ -1,9 +1,0 @@
-# High Speed ZW Optical Camera Parameters
-# lsst.obs.lsst.Latiss
-
-name: AuxTelZWO
-diameter: 1.2 # aperture diameter in meters
-obscuration: 0.3525 # fractional obscuration
-focalLength: 21.6 # effective focal length in meters
-defocalOffset: 20.5e-3 # defocal offset in meters
-pixelSize: 15.2e-6 # pixel size in meters

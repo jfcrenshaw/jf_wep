@@ -8,12 +8,12 @@ focalLength: 10.312 # effective focal length in meters
 defocalOffset: 1.5e-3 # defocal offset in meters
 pixelSize: 10.0e-6 # pixel size in meters
 wavelength: # effective wavelength per band, in meters
-  u: 3.671e-07
-  g: 4.827e-07
-  r: 6.223e-07
-  i: 7.546e-07
-  z: 8.691e-07
-  y: 9.710e-07
+  u: 367.1e-9
+  g: 482.7e-9
+  r: 622.3e-9
+  i: 754.6e-9
+  z: 869.1e-9
+  y: 971.0e-9
 batoidModelName: LSST_{band}.yaml # name used to load the Batoid model
 
 maskParams:
