@@ -484,7 +484,7 @@ class TIEAlgorithm(WfAlgorithm):
             # Apply a common mask to each
             intraMask = intraComp.mask
             extraMask = extraComp.mask
-            mask = (intraMask > 0) & (extraMask > 0)  # type: ignore
+            mask = (intraMask >= 1) & (extraMask >= 1)  # type: ignore
             intraComp.image *= mask
             extraComp.image *= mask
 

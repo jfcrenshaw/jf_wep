@@ -301,8 +301,8 @@ class Instrument:
         self,
         xAngle: float,
         yAngle: float,
-        band: Union[BandLabel, str] = BandLabel.REF,
-        jmax: int = 66,
+        band: Union[BandLabel, str],
+        jmax: int,
     ) -> np.ndarray:
         """Cached interior function for the getIntrinsicZernikes method.
 
@@ -315,10 +315,8 @@ class Instrument:
         band : BandLabel or str, optional
             The BandLabel Enum or corresponding string, specifying which batoid
             model to load. Only relevant if self.batoidModelName contains "{band}".
-            (the default is BandLabel.REF)
         jmax : int, optional
             The maximum Noll index of the intrinsic Zernikes.
-            (the default is 66)
 
         Returns
         -------
@@ -396,8 +394,8 @@ class Instrument:
         xAngle: float,
         yAngle: float,
         defocalType: DefocalType,
-        band: Union[BandLabel, str] = BandLabel.REF,
-        jmax: int = 66,
+        band: Union[BandLabel, str],
+        jmax: int,
     ) -> np.ndarray:
         """Cached interior function for the getOffAxisCoeff method.
 
@@ -410,13 +408,11 @@ class Instrument:
         defocalType : DefocalType or str
             The DefocalType Enum or corresponding string, specifying which side
             of focus to model.
-        band : BandLabel or str, optional
+        band : BandLabel or str
             The BandLabel Enum or corresponding string, specifying which batoid
             model to load. Only relevant if self.batoidModelName contains "{band}".
-            (the default is BandLabel.REF)
         jmax : int, optional
             The maximum Noll index of the off-axis model Zernikes.
-            (the default is 66)
 
         Returns
         -------
@@ -454,6 +450,8 @@ class Instrument:
             wavelength,
             jmax=jmax,
             eps=batoidModel.pupilObscuration,
+            nrad=200,
+            naz=20,
         )
 
         # Multiply by wavelength to get Zernikes in meters
