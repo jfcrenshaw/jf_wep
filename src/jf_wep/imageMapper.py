@@ -701,10 +701,15 @@ class ImageMapper:
             if rTheta < val["thetaMin"]:
                 continue
 
-            # Calculate the radius and center of the mask
+            # Calculate the radius and center of the mask in meters
             radius = np.polyval(val["radius"], rTheta)
             rCenter = np.polyval(val["center"], rTheta)
 
+            # Convert to normalized pupil coordinates
+            radius /= self.instrument.radius
+            rCenter /= self.instrument.radius
+
+            # Use angle to convert radius to u and v components
             uCenter = 0 if rTheta == 0 else rCenter * angle[0] / rTheta
             vCenter = 0 if rTheta == 0 else rCenter * angle[1] / rTheta
 
