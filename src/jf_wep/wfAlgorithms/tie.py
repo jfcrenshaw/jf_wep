@@ -521,8 +521,8 @@ class TIEAlgorithm(WfAlgorithm):
                     zkResid = self._fftSolve(I0, dIdz, jmax, instrument)
 
                 # Check for convergence
-                # (1) The mean absolute difference with the previous iteration
-                # must be below self.convergeTol
+                # (1) The max absolute difference with the previous iteration
+                #     must be below self.convergeTol
                 # (2) We must be compensating all the Zernikes
                 newBest = zkComp + zkResid
                 converged = (jmaxComp >= jmax) & (
