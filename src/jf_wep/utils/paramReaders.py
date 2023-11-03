@@ -124,16 +124,18 @@ def mergeParams(paramFile: Union[Path, str, None], **kwargs: Any) -> dict:
     else:
         params = readParamYaml(paramFile)
 
-    # Get the list of all keys
-    keys = (params | kwargs).keys()
+    # Determine if the paramFile contains keywords that are not present in kwargs
+    extraKeys = set(params.keys()) - set(kwargs.keys())
+    if len(extraKeys) > 0:
+        raise ValueError(f"paramFile contains unrecognized keys {extraKeys}")
 
     # Merge the dictionaries
     mergedParams = {}
-    for key in keys:
-        if kwargs.get(key, None) is not None:
-            mergedParams[key] = kwargs[key]
-        else:
+    for key, val in kwargs.items():
+        if val is None:
             mergedParams[key] = params.get(key, None)
+        else:
+            mergedParams[key] = val
 
     return mergedParams
 

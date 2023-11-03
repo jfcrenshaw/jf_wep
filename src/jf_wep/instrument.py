@@ -42,6 +42,17 @@ class Instrument:
         photometric bands, and the names of these bands will be filled in at
         runtime using the strings specified in the BandLabel enum in
         jf_wep.utils.enums.
+    maskParams : dict, optional
+        Dictionary of mask parameters. Each key in this dictionary corresponds
+        to a different mask element. The corresponding values are dictionaries
+        that define circles with different centers and radii. The key, value
+        pairs are
+            - thetaMin: the minimum field angle in degrees for which this mask
+            element is relevant
+            - center: list of polynomial coefficients (in meters) for np.polyval
+            to determine the center of the circle
+            - radius: list of polynomial coefficients (in meters) for np.polyval
+            to determine the radius of the circle
     """
 
     def __init__(
@@ -55,6 +66,7 @@ class Instrument:
         pixelSize: Optional[float] = None,
         wavelength: Union[float, dict, None] = None,
         batoidModelName: Optional[str] = None,
+        maskParams: Optional[dict] = None,
     ) -> None:
         # Merge keyword arguments with defaults from configFile
         params = mergeParams(
@@ -67,6 +79,7 @@ class Instrument:
             pixelSize=pixelSize,
             wavelength=wavelength,
             batoidModelName=batoidModelName,
+            maskParams=maskParams,
         )
 
         # Set each parameter

@@ -27,7 +27,7 @@ class WfEstimator:
         path starts with "policy/", it will look in the policy directory.
         Any explicitly passed parameters override values found in this file
         (the default is policy/wfEstimator.yaml)
-    algo : str, optional
+    algoName : str, optional
         Name of the algorithm to use. Options are "tie".
     algoConfig : Path or str or dict or WfAlgorithm, optional
         Algorithm configuration. If a Path or string, it is assumed this
@@ -62,6 +62,7 @@ class WfEstimator:
             configFile,
             algoName=algoName,
             algoConfig=algoConfig,
+            instConfig=instConfig,
             jmax=jmax,
             units=units,
         )
